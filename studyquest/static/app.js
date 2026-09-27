@@ -88,7 +88,7 @@ $("#sound-toggle").addEventListener("click", async () => {
 function go(view) {
   S.view = view;
   document.querySelectorAll("nav button[data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
-  ({ quest: renderQuest, review: renderReview, map: renderMap, stats: renderStats })[view]();
+  ({ quest: renderQuest, review: renderReview, map: renderWorld, stats: renderStats })[view]();
 }
 
 // ---------- quest ----------
@@ -383,22 +383,6 @@ async function renderReview() {
 }
 
 // ---------- map ----------
-async function renderMap() {
-  loading("Loading map…");
-  try {
-    const m = await api("/api/map");
-    app.innerHTML = m.zones.map((z) => `
-      <section class="card zone"><h2>${esc(z.zone)} <span class="muted">· ${z.cleared}/${z.levels.length} cleared</span></h2>
-        <div class="levels">${z.levels.map((l) => `<div class="level ${l.complete ? "cleared" : l.left < l.total ? "partial" : ""}" title="${esc(l.date_label)} · ${esc(l.session)} · ${l.total - l.left}/${l.total}">${esc((l.date || "").slice(8))}</div>`).join("")}</div>
-      </section>`).join("") + m.bosses.map((b) => `
-      <section class="card"><h2>👹 ${esc(b.name)} ${b.beaten ? "· beaten ✅" : ""}</h2>
-        <p class="muted">${b.minutes}-min timed mock from past exams. ${b.unlocked ? "Unlocked." : `Unlocks after “${esc(b.unlock_after)}”.`}${b.best != null ? ` Best: ${Math.round(b.best * 100)}%` : ""}</p>
-        <button class="btn ${b.unlocked ? "primary" : ""}" data-boss="${esc(b.id)}" ${b.unlocked ? "" : "disabled"}>Fight</button>
-      </section>`).join("") + `<button class="btn link" id="full">Show full plan</button><div id="fullplan"></div>`;
-    document.querySelectorAll("[data-boss]").forEach((b) => (b.onclick = () => renderBoss(b.dataset.boss)));
-    $("#full").onclick = showFullPlan;
-  } catch (e) { app.innerHTML = ""; showError(e); }
-}
 async function showFullPlan() {
   const p = await api("/api/plan");
   $("#fullplan").innerHTML = p.sessions.map((s) => `<section class="card"><p class="eyebrow">${esc(s.date_label)} · ${esc(s.time)} · ${esc(s.subject)}</p>

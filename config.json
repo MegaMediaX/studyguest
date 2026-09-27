@@ -2,9 +2,31 @@
   "year": 2026,
   "port": 8765,
   "courses": {
-    "MATH202": {"folder": "MATH202 - Calculus II", "notes": "MATH202 - Calculus II.md", "aliases": ["Calc II", "Calculus II", "MATH202"]},
-    "MECT313": {"folder": "MECT313 - Machinery", "notes": "MECT313 - Machinery.md", "aliases": ["Machinery", "MECT313"]},
-    "MECT320": {"folder": "MECT320 - Industrial Automation Lab", "notes": "MECT320 - Industrial Automation Lab.md", "aliases": ["Automation Lab", "MECT320"]}
+    "MATH202": {
+      "folder": "MATH202 - Calculus II",
+      "notes": "MATH202 - Calculus II.md",
+      "aliases": [
+        "Calc II",
+        "Calculus II",
+        "MATH202"
+      ]
+    },
+    "MECT313": {
+      "folder": "MECT313 - Machinery",
+      "notes": "MECT313 - Machinery.md",
+      "aliases": [
+        "Machinery",
+        "MECT313"
+      ]
+    },
+    "MECT320": {
+      "folder": "MECT320 - Industrial Automation Lab",
+      "notes": "MECT320 - Industrial Automation Lab.md",
+      "aliases": [
+        "Automation Lab",
+        "MECT320"
+      ]
+    }
   },
   "file_aliases": {
     "fares": "Multivariable-functions.pdf",
@@ -16,10 +38,31 @@
     "notes pp": "Course Notes/Chapter 2 Multiple Integrals EN.pdf"
   },
   "exams": [
-    {"course": "MATH202", "name": "MATH202 Exam I", "date": "2026-10-08", "time": "12:30", "room": "ECB13", "scope": "Chapter 1, sections 14.1–14.8"},
-    {"course": "MECT313", "name": "MECT313 Quiz 2", "date": "2026-10-12", "note": "week of 12–16 Oct, day TBC"},
-    {"course": "MECT313", "name": "MECT313 Midterm", "date": "2026-10-19", "note": "19–23 Oct, MCQ, closed book"},
-    {"course": "MATH202", "name": "MATH202 Exam II", "date": "2026-11-12"}
+    {
+      "course": "MATH202",
+      "name": "MATH202 Exam I",
+      "date": "2026-10-08",
+      "time": "12:30",
+      "room": "ECB13",
+      "scope": "Chapter 1, sections 14.1–14.8"
+    },
+    {
+      "course": "MECT313",
+      "name": "MECT313 Quiz 2",
+      "date": "2026-10-12",
+      "note": "week of 12–16 Oct, day TBC"
+    },
+    {
+      "course": "MECT313",
+      "name": "MECT313 Midterm",
+      "date": "2026-10-19",
+      "note": "19–23 Oct, MCQ, closed book"
+    },
+    {
+      "course": "MATH202",
+      "name": "MATH202 Exam II",
+      "date": "2026-11-12"
+    }
   ],
   "bosses": [
     {
@@ -29,19 +72,178 @@
       "unlock_after_session": "Timed mock: Exam 1 Spring 2024",
       "minutes": 75,
       "questions": 6,
-      "sources": ["Exam1.pdf", "Exam 2.pdf", "Final.pdf", "Solution-test1.pdf", "Solution exam 2.pdf"],
+      "sources": [
+        "Exam1.pdf",
+        "Exam 2.pdf",
+        "Final.pdf",
+        "Solution-test1.pdf",
+        "Solution exam 2.pdf"
+      ],
       "scope": "Chapter 1: 14.1–14.8 (limits, partials, chain rule, gradient, tangent planes, linearization, extrema, Lagrange)"
     }
   ],
-  "ocr_skip": ["book - Thomas Calculus 12th Edition Textbook.pdf"],
-  "defaults": {"sprint_min": 25, "break_min": 4, "sound": true, "focus_fullscreen": true},
+  "ocr_skip": [
+    "book - Thomas Calculus 12th Edition Textbook.pdf"
+  ],
+  "defaults": {
+    "sprint_min": 25,
+    "break_min": 4,
+    "sound": true,
+    "focus_fullscreen": true
+  },
   "ai": {
     "claude_timeout_s": 180,
     "gemini_timeout_s": 150,
     "gemini_effort": "medium",
     "retries": 2,
     "pass_threshold": 0.7,
-    "second_opinion_band": [0.55, 0.85],
+    "second_opinion_band": [
+      0.55,
+      0.85
+    ],
     "second_opinion_below_confidence": 0.7
-  }
+  },
+  "world": [
+    {
+      "course": "MATH202",
+      "region": "Calculus Highlands",
+      "icon": "⛰️",
+      "zones": [
+        {
+          "id": "limits-pass",
+          "name": "Limits Pass",
+          "icon": "🌫️",
+          "match": [
+            "14.1",
+            "14.2"
+          ],
+          "x": 80,
+          "y": 300
+        },
+        {
+          "id": "partial-peaks",
+          "name": "Partial Peaks",
+          "icon": "🏔️",
+          "match": [
+            "14.3",
+            "14.4"
+          ],
+          "x": 210,
+          "y": 200
+        },
+        {
+          "id": "gradient-gorge",
+          "name": "Gradient Gorge",
+          "icon": "🧭",
+          "match": [
+            "14.5",
+            "14.6"
+          ],
+          "x": 350,
+          "y": 270
+        },
+        {
+          "id": "lagrange-lake",
+          "name": "Lagrange Lake",
+          "icon": "🌊",
+          "match": [
+            "14.7",
+            "14.8",
+            "Lagrange",
+            "Extrema"
+          ],
+          "x": 480,
+          "y": 170
+        },
+        {
+          "id": "mock-citadel",
+          "name": "Mock Citadel",
+          "icon": "🏰",
+          "match": [
+            "Ch.1 review",
+            "mock",
+            "weak spots",
+            "Mixed practice",
+            "light review"
+          ],
+          "x": 610,
+          "y": 260
+        },
+        {
+          "id": "integral-depths",
+          "name": "Integral Depths",
+          "icon": "🕳️",
+          "match": [
+            "15."
+          ],
+          "x": 730,
+          "y": 150
+        }
+      ]
+    },
+    {
+      "course": "MECT313",
+      "region": "The Foundry",
+      "icon": "🏭",
+      "zones": [
+        {
+          "id": "magnet-mines",
+          "name": "Magnet Mines",
+          "icon": "🧲",
+          "match": [
+            "Ch1 Magnetic",
+            "Magnetic"
+          ],
+          "x": 90,
+          "y": 260
+        },
+        {
+          "id": "transformer-tower",
+          "name": "Transformer Tower",
+          "icon": "🗼",
+          "match": [
+            "Transformer",
+            "3-phase",
+            "Quiz 2"
+          ],
+          "x": 240,
+          "y": 170
+        },
+        {
+          "id": "ac-caverns",
+          "name": "AC Caverns",
+          "icon": "🌀",
+          "match": [
+            "Ch4",
+            "AC machinery"
+          ],
+          "x": 390,
+          "y": 280
+        },
+        {
+          "id": "sync-citadel",
+          "name": "Synchronous Citadel",
+          "icon": "⚙️",
+          "match": [
+            "Sync",
+            "Generators"
+          ],
+          "x": 540,
+          "y": 180
+        },
+        {
+          "id": "midterm-keep",
+          "name": "Midterm Keep",
+          "icon": "👑",
+          "match": [
+            "Midterm",
+            "MCQ",
+            "Final midterm"
+          ],
+          "x": 690,
+          "y": 270
+        }
+      ]
+    }
+  ]
 }

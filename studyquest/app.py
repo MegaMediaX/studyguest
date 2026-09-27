@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import ai, boss, bounties, checker, encounter, importer, progress, quest, review, run, sources, store
+from . import ai, boss, bounties, checker, encounter, importer, progress, quest, review, run, sources, store, world
 
 STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -371,11 +371,21 @@ def api_run():
     return {"run": run.public(r) if r and r["state"] == "active" else None}
 
 
+class RunStart(BaseModel):
+    zone: str | None = Field(None, max_length=40)
+
+
 @app.post("/api/run/start")
-def api_run_start():
+def api_run_start(body: RunStart | None = None):
     plan = progress.load_plan()
     with progress.transaction() as p:
-        return {"run": run.public(run.start(p, plan))}
+        return {"run": run.public(run.start(p, plan, body.zone if body else None))}
+
+
+@app.get("/api/world")
+def api_world():
+    p, plan = _state()
+    return {"regions": world.build(p, plan), "bosses": boss.list_bosses(p, plan)}
 
 
 class PerkPick(BaseModel):

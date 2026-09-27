@@ -24,9 +24,13 @@ def _session_for_run(p: dict, plan: dict) -> dict | None:
     return next((s for s in plan["sessions"] if s["id"] == sid), None)
 
 
-def start(p: dict, plan: dict) -> dict:
+def start(p: dict, plan: dict, zone: str | None = None) -> dict:
     if p.get("run") and p["run"]["state"] == "active":
         return p["run"]
+    if zone:
+        from . import world
+        return _new_run(p, world.zone_queue(p, plan, zone, MAX_FLOORS), zone,
+                        next(z["name"] for r in world.build(p, plan) for z in r["zones"] if z["id"] == zone))
     session = _session_for_run(p, plan)
     if not session:
         raise KeyError("No session to run.")
@@ -41,10 +45,13 @@ def start(p: dict, plan: dict) -> dict:
             queue.append({"task_id": t["id"], "mode": "task"})
     if not queue:
         raise KeyError("Nothing left to fight on this floor. Try the Review tab or tomorrow's session.")
-    p["run"] = {"id": secrets.token_hex(3), "session_id": session["id"], "session": session["session"],
-                "queue": queue, "floor": 0, "perks": [], "offer": [], "state": "active", "started": time.time(),
-                "log": []}
-    progress.log(p, "run_start", None, floors=len(queue))
+    return _new_run(p, queue, session["id"], session["session"])
+
+
+def _new_run(p: dict, queue: list[dict], where_id: str, label: str) -> dict:
+    p["run"] = {"id": secrets.token_hex(3), "session_id": where_id, "session": label, "queue": queue, "floor": 0,
+                "perks": [], "offer": [], "state": "active", "started": time.time(), "log": []}
+    progress.log(p, "run_start", None, floors=len(queue), where=label)
     return p["run"]
 
 

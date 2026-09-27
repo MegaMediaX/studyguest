@@ -17,6 +17,7 @@ it runs the app, answers the `/quest-*` commands, and tutors. Gemini (`agy -p`) 
 | `studyquest/encounter.py` | **battles** (the web done-check): lesson + in-app pages → problems → instant grading, HP = pass threshold |
 | `studyquest/mathcheck.py` | local answer checking (numbers, expressions by random-point evaluation, points, MCQ); strict AST whitelist |
 | `studyquest/run.py`, `perks.py`, `bounties.py` | runs (≤ 4 floors, perk draft), chests (published odds, pity, no dupes), daily bounties, shards/keys |
+| `studyquest/world.py` | world map: courses = regions, topic clusters = zones (`config.json` "world"), tiers, seals, Rift corruption, zone runs |
 | `studyquest/sources.py` | serves course pages as images/text inside the app (looked up via the corpus only) |
 | `studyquest/checker.py` | text done-check used by the terminal `/quest-check` and for 📌 action tasks |
 | `studyquest/review.py` | Leitner spaced review (1/3/7 days), interleaving, daily 3 quick wins |
@@ -68,4 +69,5 @@ it runs the app, answers the `/quest-*` commands, and tutors. Gemini (`agy -p`) 
     .venv/bin/python -m studyquest.cli status
 
 To test against another date: `STUDYQUEST_TODAY=2026-10-04`. To use a scratch data dir: `STUDYQUEST_DATA=/tmp/x`.
-New exam or boss: edit `config.json` (`exams`, `bosses`). New course: add it under `courses` with its folder.
+New exam or boss: edit `config.json` (`exams`, `bosses`). New topic: add a zone to `world` with `match`
+keywords (substring of session titles; later zones win ties) and an x/y position on the 820×400 map. New course: add it under `courses` with its folder.
