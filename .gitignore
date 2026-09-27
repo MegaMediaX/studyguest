@@ -1,0 +1,17 @@
+# Allowlist: this folder also holds course files (copyrighted textbook, exams) and personal progress.
+# Only the app is tracked. Everything else is ignored by default.
+/*
+!/.gitignore
+!/studyquest/
+!/tests/
+!/docs/
+!/.claude/
+!/CLAUDE.md
+!/README.md
+!/config.json
+!/requirements.txt
+!/start.sh
+/.claude/*
+!/.claude/commands/
+__pycache__/
+*.pyc

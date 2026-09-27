@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StudyQuest</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="timebar" aria-hidden="true"><div id="timebar-fill"></div></div>
+  <header>
+    <div class="hud">
+      <span id="hud-level" title="Level">Lv 1</span>
+      <span class="xpbar" title="XP to next level"><span id="hud-xpfill"></span></span>
+      <span id="hud-streak" title="Streak">🔥 0</span>
+      <span id="hud-clock" class="clock" title="Time left"></span>
+    </div>
+    <nav>
+      <button data-view="quest" class="active">Quest</button>
+      <button data-view="review">Review <span id="review-badge" class="badge hidden"></span></button>
+      <button data-view="map">Map</button>
+      <button data-view="stats">Stats</button>
+      <button id="sound-toggle" title="Sound on/off">🔊</button>
+    </nav>
+  </header>
+
+  <main id="app"><p class="muted">Loading…</p></main>
+
+  <div id="toast" class="hidden" role="status"></div>
+  <template id="tpl-empty">
+    <section class="card center">
+      <h1>No plan yet</h1>
+      <p>Import your checklist (CSV or markdown).</p>
+      <label class="btn big">Choose file<input type="file" id="import-file" accept=".csv,.md,.txt" hidden></label>
+    </section>
+  </template>
+  <script src="/static/app.js"></script>
+</body>
+</html>

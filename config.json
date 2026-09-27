@@ -1,0 +1,47 @@
+{
+  "year": 2026,
+  "port": 8765,
+  "courses": {
+    "MATH202": {"folder": "MATH202 - Calculus II", "notes": "MATH202 - Calculus II.md", "aliases": ["Calc II", "Calculus II", "MATH202"]},
+    "MECT313": {"folder": "MECT313 - Machinery", "notes": "MECT313 - Machinery.md", "aliases": ["Machinery", "MECT313"]},
+    "MECT320": {"folder": "MECT320 - Industrial Automation Lab", "notes": "MECT320 - Industrial Automation Lab.md", "aliases": ["Automation Lab", "MECT320"]}
+  },
+  "file_aliases": {
+    "fares": "Multivariable-functions.pdf",
+    "farah": "Math202.pdf",
+    "textbook": "book - Thomas Calculus 12th Edition Textbook.pdf",
+    "course notes ch.1": "Course Notes/Chapter 1 Functions of several variables and partial derivatives EN.pdf",
+    "course notes ch.2": "Course Notes/Chapter 2 Multiple Integrals EN.pdf",
+    "course notes ch.3": "Course Notes/Chapter 3 Integration in Vector Fields EN.pdf",
+    "notes pp": "Course Notes/Chapter 2 Multiple Integrals EN.pdf"
+  },
+  "exams": [
+    {"course": "MATH202", "name": "MATH202 Exam I", "date": "2026-10-08", "time": "12:30", "room": "ECB13", "scope": "Chapter 1, sections 14.1–14.8"},
+    {"course": "MECT313", "name": "MECT313 Quiz 2", "date": "2026-10-12", "note": "week of 12–16 Oct, day TBC"},
+    {"course": "MECT313", "name": "MECT313 Midterm", "date": "2026-10-19", "note": "19–23 Oct, MCQ, closed book"},
+    {"course": "MATH202", "name": "MATH202 Exam II", "date": "2026-11-12"}
+  ],
+  "bosses": [
+    {
+      "id": "math202-exam1",
+      "course": "MATH202",
+      "name": "Exam I Boss",
+      "unlock_after_session": "Timed mock: Exam 1 Spring 2024",
+      "minutes": 75,
+      "questions": 6,
+      "sources": ["Exam1.pdf", "Exam 2.pdf", "Final.pdf", "Solution-test1.pdf", "Solution exam 2.pdf"],
+      "scope": "Chapter 1: 14.1–14.8 (limits, partials, chain rule, gradient, tangent planes, linearization, extrema, Lagrange)"
+    }
+  ],
+  "ocr_skip": ["book - Thomas Calculus 12th Edition Textbook.pdf"],
+  "defaults": {"sprint_min": 12, "break_min": 4, "sound": true},
+  "ai": {
+    "claude_timeout_s": 180,
+    "gemini_timeout_s": 150,
+    "gemini_effort": "medium",
+    "retries": 2,
+    "pass_threshold": 0.7,
+    "second_opinion_band": [0.55, 0.85],
+    "second_opinion_below_confidence": 0.7
+  }
+}
