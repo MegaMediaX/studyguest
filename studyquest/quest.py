@@ -15,7 +15,9 @@ def _status(p: dict, tid: str) -> str:
 
 def _task_view(p: dict, t: dict) -> dict:
     st = _status(p, t["id"])
-    return {"id": t["id"], "text": t["text"], "kind": t["kind"], "status": st, "icon": STATUS_ICON[st]}
+    return {"id": t["id"], "text": t["text"], "kind": t["kind"], "status": st, "icon": STATUS_ICON[st],
+            "stars": p.get("stars", {}).get(t["id"], 0),
+            "battle": (p.get("encounters", {}).get(t["id"]) or {}).get("state")}
 
 
 def session_view(p: dict, s: dict, with_tasks: bool = True) -> dict:

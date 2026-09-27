@@ -34,7 +34,7 @@
     }
   ],
   "ocr_skip": ["book - Thomas Calculus 12th Edition Textbook.pdf"],
-  "defaults": {"sprint_min": 12, "break_min": 4, "sound": true},
+  "defaults": {"sprint_min": 25, "break_min": 4, "sound": true, "focus_fullscreen": true},
   "ai": {
     "claude_timeout_s": 180,
     "gemini_timeout_s": 150,

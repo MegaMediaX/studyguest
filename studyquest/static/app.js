@@ -57,6 +57,7 @@ function renderHud(t) {
   $("#hud-streak").textContent = `🔥 ${t.streak.current}${t.streak.freeze_available ? "" : " ❄️"}`;
   $("#hud-streak").title = `Streak ${t.streak.current} (best ${t.streak.best}). ${t.streak.freeze_available ? "1 free freeze left this week." : "Freeze used this week."}`;
   const b = $("#review-badge"); b.textContent = t.review_due; b.classList.toggle("hidden", !t.review_due);
+  $("#hud-title").textContent = t.title ? `· ${t.title}` : "";
 }
 function sessionWindow() {
   const s = S.today?.session; if (!s || !s.time || S.today.label !== "today") return null;
@@ -65,14 +66,13 @@ function sessionWindow() {
   return { start: new Date(`${s.date}T${a}`), end: new Date(`${s.date}T${b}`) };
 }
 function tick() {
-  const sp = LS.get("sprint", null), br = LS.get("break", null), now = Date.now();
+  const br = LS.get("break", null), now = Date.now();
   let frac = 0, label = "";
-  if (sp) { frac = 1 - (sp.end - now) / (sp.minutes * 60000); label = `⏱ ${fmt((sp.end - now) / 1000)}`; if (now >= sp.end) finishSprint(); }
-  else if (br) { frac = 1 - (br.end - now) / (br.minutes * 60000); label = `☕ ${fmt((br.end - now) / 1000)}`; if (now >= br.end) endBreak(); }
+  if (br) { frac = 1 - (br.end - now) / (br.minutes * 60000); label = `☕ ${fmt((br.end - now) / 1000)}`; if (now >= br.end) endBreak(); }
   else { const w = sessionWindow(); if (w && now >= w.start && now < w.end) { frac = (now - w.start) / (w.end - w.start); label = `${fmt((w.end - now) / 1000)} left in session`; } }
   $("#timebar-fill").style.width = `${Math.min(100, Math.max(0, frac * 100))}%`;
   $("#hud-clock").textContent = label;
-  const big = $("#big-timer"); if (big) big.textContent = sp ? fmt((sp.end - now) / 1000) : br ? fmt((br.end - now) / 1000) : "";
+  const big = $("#big-timer"); if (big) big.textContent = br ? fmt((br.end - now) / 1000) : "";
   const hint = $("#hint-wait");
   if (hint) { const left = (S.check.retryAt - now) / 1000; hint.textContent = left > 0 ? `Retry unlocks in ${fmt(left)}` : ""; $("#submit-check").disabled = left > 0; }
 }
@@ -107,38 +107,46 @@ function dots(tasks, cur) {
 }
 
 async function renderQuest() {
-  if (LS.get("sprint", null)) return renderSprint();
   if (LS.get("break", null)) return renderBreak();
   if (S.phase === "check" && S.check) return renderCheck();
-  loading("Loading today's quest…");
+  loading("Loading today's floor…");
   let t;
   try { t = await loadToday(); } catch (e) { if (e.data?.kind === "no_plan") return renderEmpty(); app.innerHTML = ""; return showError(e); }
   const s = t.session;
-  if (!s) { app.innerHTML = `<section class="card center"><h1>No sessions left in the plan 🎉</h1></section>`; return; }
+  if (!s) { app.innerHTML = `<section class="card center"><h1>No floors left in the plan 🎉</h1></section>`; return; }
   const task = currentTask();
   if (!task) return renderVerdict(s.id);
+  const cleared = s.tasks.filter((x) => x.status === "done" || x.status === "override").length;
+  const nodes = s.tasks.map((x, i) => {
+    const icon = x.status === "done" || x.status === "override" ? "✅" : x.status === "review" ? "🔁" : x.kind === "action" ? "📌" : i === S.taskIndex ? "⚔️" : "❔";
+    return `<button class="node ${i === S.taskIndex ? "current" : ""} ${x.status}" data-i="${i}" title="${esc(x.text)}">
+      <span>${icon}</span><small>${x.stars ? "★".repeat(x.stars) : ""}</small></button>`;
+  }).join('<span class="edge"></span>');
   const where = t.last ? `<button class="btn link" id="where">Where was I?</button>` : "";
-  const qw = !LS.get(`qw-${t.date}`, false) && t.label === "today" ? `<button class="btn link" id="qw">3 quick wins ⚡</button>` : "";
+  const qw = !LS.get(`qw-${t.date}`, false) && t.label === "today" ? `<button class="btn link" id="qw">⚡ 3 quick wins</button>` : "";
+  const fighting = task.battle === "fighting";
   app.innerHTML = `
     <section class="card" id="task-card">
-      <p class="eyebrow">${t.label === "today" ? "Today" : "Next"} · ${esc(s.date_label)} · ${esc(s.time)} · ${esc(s.subject)}</p>
+      <p class="eyebrow">${t.label === "today" ? "Today's floor" : "Next floor"} · ${esc(s.date_label)} · ${esc(s.time)} · ${esc(s.subject)}</p>
       <h2>${esc(s.session)}</h2>
-      ${dots(s.tasks, S.taskIndex)}
-      <p class="eyebrow">Task ${S.taskIndex + 1} of ${s.total} · ${esc(task.kind)} ${task.status === "review" ? "· 🔁 review" : ""}</p>
+      <div class="floor-progress"><div style="width:${Math.round((100 * cleared) / s.total)}%"></div></div>
+      <div class="path">${nodes}</div>
+      <p class="eyebrow">Encounter ${S.taskIndex + 1} of ${s.total} ${task.status === "review" ? "· 🔁 rematch" : ""}</p>
       <div class="task-text">${esc(task.text)}</div>
-      <div class="row"><button class="btn primary big" id="start">Start</button></div>
-      <div class="row spread">
-        <span>${where}${qw}</span>
-        <span><button class="btn link" id="check-now">I've done it → check</button><button class="btn link" id="skip">Next task ›</button></span>
-      </div>
+      <div class="row"><button class="btn primary big" id="start">${task.kind === "action" ? "📌 Mark with proof" : fighting ? "⚔️ Resume battle" : "⚔️ Enter battle"}</button></div>
+      <div class="row spread"><span>${where}${qw}</span><span><button class="btn link" id="skip">Other encounter ›</button></span></div>
       <div id="help"></div>
-      ${t.backlog.tasks ? `<p class="muted" style="font-size:.85rem;margin-top:14px">${t.backlog.tasks} earlier task(s) still open. They're on the Map when you want them.</p>` : ""}
+      ${t.backlog.tasks ? `<p class="muted small" style="margin-top:14px">${t.backlog.tasks} earlier encounter(s) still open. They're on the Map.</p>` : ""}
     </section>`;
-  $("#start").onclick = () => renderIntent(task);
-  $("#check-now").onclick = () => startCheck(task);
+  $("#start").onclick = () => (task.kind === "action" ? startCheck(task) : startBattle(task));
   $("#skip").onclick = () => { S.taskIndex = nextIndex(s.tasks, S.taskIndex); renderQuest(); };
+  document.querySelectorAll(".node").forEach((n) => (n.onclick = () => { S.taskIndex = +n.dataset.i; renderQuest(); }));
   if (t.last) $("#where").onclick = () => whereWasI(t.last);
   if (qw) $("#qw").onclick = () => renderQuickWins();
+  // warm the next battles so they open instantly
+  const upcoming = s.tasks.filter((x) => x.status === "todo" && x.kind !== "action").map((x) => x.id);
+  const order = [task.id, ...upcoming.filter((id) => id !== task.id)].slice(0, 3);
+  api("/api/battle/prefetch", { json: { task_ids: order } }).catch(() => {});
 }
 function nextIndex(tasks, i) {
   for (let k = 1; k <= tasks.length; k++) { const j = (i + k) % tasks.length; if (tasks[j].status !== "done" && tasks[j].status !== "override") return j; }
@@ -157,86 +165,25 @@ function renderEmpty() {
   };
 }
 
-// ---------- implementation intention + sprint + break ----------
-function renderIntent(task) {
-  const m = S.settings.sprint_min;
-  app.innerHTML = `
-    <section class="card">
-      <p class="eyebrow">Before you start</p>
-      <div class="task-text" style="font-size:1.25rem">${esc(task.text)}</div>
-      <label class="q" for="intent">When the timer starts, I will first…</label>
-      <input type="text" id="intent" placeholder="open the PDF at §1.1 and write the definition of a level curve" autofocus>
-      <div class="row">
-        <label class="muted">Sprint <input type="range" id="len" min="5" max="25" value="${m}"> <b id="len-v">${m}</b> min</label>
-      </div>
-      <div class="row"><button class="btn primary big" id="go">Go</button><button class="btn link" id="back">Back</button></div>
-    </section>`;
-  $("#len").oninput = (e) => { $("#len-v").textContent = e.target.value; };
-  $("#back").onclick = () => renderQuest();
-  const start = () => {
-    const minutes = +$("#len").value;
-    LS.set("sprint", { end: Date.now() + minutes * 60000, minutes, intention: $("#intent").value.trim(), taskId: task.id, taskText: task.text });
-    renderSprint();
-  };
-  $("#go").onclick = start;
-  $("#intent").onkeydown = (e) => { if (e.key === "Enter") start(); };
-}
-function renderSprint() {
-  const sp = LS.get("sprint", null);
-  app.innerHTML = `
-    <section class="card">
-      <p class="eyebrow">Sprint · ${sp.minutes} min</p>
-      <div class="task-text">${esc(sp.taskText)}</div>
-      ${sp.intention ? `<p class="muted">First: ${esc(sp.intention)}</p>` : ""}
-      <div class="timer-big" id="big-timer">${fmt((sp.end - Date.now()) / 1000)}</div>
-      <div class="row">
-        <button class="btn" id="stuck">I'm stuck</button>
-        <button class="btn" id="explain">Explain differently</button>
-        <button class="btn" id="extend" title="In flow? Keep going">+5 min</button>
-        <button class="btn link" id="done-early">Done early → check</button>
-      </div>
-      <div id="help"></div>
-    </section>`;
-  $("#stuck").onclick = () => askHelp("stuck", sp.taskId);
-  $("#explain").onclick = () => askHelp("explain", sp.taskId);
-  $("#done-early").onclick = () => finishSprint(true);
-  $("#extend").onclick = () => {
-    const cur = LS.get("sprint", null); if (!cur) return;
-    LS.set("sprint", { ...cur, end: cur.end + 5 * 60000, minutes: cur.minutes + 5 });
-    toast("+5 min"); tick();
-  };
-}
-async function finishSprint(early = false) {
-  const sp = LS.get("sprint", null); if (!sp) return;
-  LS.set("sprint", null);
-  const minutes = early ? Math.max(1, Math.round((Date.now() - (sp.end - sp.minutes * 60000)) / 60000)) : sp.minutes;
-  try {
-    const r = await api("/api/sprint/done", { json: { minutes, intention: sp.intention, task_id: sp.taskId } });
-    loadToday().catch(() => {});
-    if (r.events.some((e) => e.type === "streak")) { beep("win"); toast(`🔥 Streak: ${r.streak.current} day${r.streak.current === 1 ? "" : "s"}`); }
-  } catch (e) { /* the sprint still happened; don't block the flow */ }
-  if (early) { const task = { id: sp.taskId, text: sp.taskText }; return startCheck(task); }
-  LS.set("break", { end: Date.now() + S.settings.break_min * 60000, minutes: S.settings.break_min, taskId: sp.taskId, taskText: sp.taskText });
-  beep("win");
-  renderBreak();
-}
+// ---------- campfire break ----------
 function renderBreak() {
   app.innerHTML = `
     <section class="card break">
-      <p class="eyebrow">Break</p>
+      <div class="monster">🔥</div>
+      <p class="eyebrow">Campfire</p>
       <h1>Stand up. Water. Look far away.</h1>
       <div class="timer-big" id="big-timer"></div>
-      <div class="row" style="justify-content:center">
-        <button class="btn primary" id="check">Check the task now</button>
-        <button class="btn" id="skipbreak">Skip break</button>
-      </div>
+      <div class="row" style="justify-content:center"><button class="btn primary" id="skipbreak">Back to the dungeon</button></div>
     </section>`;
-  const br = LS.get("break", null);
-  $("#check").onclick = () => { LS.set("break", null); startCheck({ id: br.taskId, text: br.taskText }); };
-  $("#skipbreak").onclick = () => endBreak();
+  $("#skipbreak").onclick = () => endBreak(true);
   tick();
 }
-function endBreak() { if (!LS.get("break", null)) return; LS.set("break", null); beep("lose"); if (S.view === "quest") renderQuest(); }
+function endBreak(manual = false) {
+  if (!LS.get("break", null)) return;
+  LS.set("break", null); LS.set("lastBreak", Date.now());
+  if (!manual) beep("win");
+  if (S.view === "quest" && S.phase !== "battle") renderQuest();
+}
 
 // ---------- help ----------
 async function askHelp(kind, taskId) {
@@ -416,8 +363,8 @@ async function renderReview() {
     const c = r.due[0];
     app.innerHTML = `<section class="card"><p class="eyebrow">Review · ${r.total_due} due · mixed topics</p>
       <p class="muted">${esc(c.topic)}</p><div class="task-text">${esc(c.text)}</div>
-      <div class="row"><button class="btn primary big" id="go">Recall it</button></div></section>`;
-    $("#go").onclick = () => startCheck({ id: c.task_id, text: c.text }, "review");
+      <div class="row"><button class="btn primary big" id="go">⚔️ Rematch</button></div></section>`;
+    $("#go").onclick = () => startBattle({ id: c.task_id, text: c.text }, "review");
   } catch (e) { app.innerHTML = ""; showError(e); }
 }
 
@@ -484,29 +431,51 @@ async function renderStats() {
       </div></section>
       <section class="card"><h2>Exams</h2>${s.exams.map((e) => `<div class="exam"><span>${esc(e.name)}${e.room ? ` · ${esc(e.time)} ${esc(e.room)}` : ""}</span><b>${e.days === 0 ? "TODAY" : `${e.days} day${e.days === 1 ? "" : "s"}`}</b></div>`).join("")}</section>
       <section class="card"><h2>Mastery by topic</h2><div class="heat">${s.mastery.map((m) => `<div style="background:${heatColor(m.score)}" title="${Math.round(m.score * 100)}%"><b>${esc((m.date || "").slice(5))}</b> ${esc(m.topic)}</div>`).join("")}</div></section>
+      <section class="card" id="inventory"><h2>Inventory</h2><p class="muted">Loading…</p></section>
       <section class="card"><h2>Settings & data</h2>
-        <div class="row"><label>Sprint <input type="number" id="set-sprint" min="5" max="25" value="${S.settings.sprint_min}" style="width:70px"> min</label>
-        <label>Break <input type="number" id="set-break" min="3" max="5" value="${S.settings.break_min}" style="width:60px"> min</label>
+        <div class="row"><label>Campfire every <input type="number" id="set-sprint" min="5" max="60" value="${S.settings.sprint_min}" style="width:70px"> min</label>
+        <label>for <input type="number" id="set-break" min="3" max="10" value="${S.settings.break_min}" style="width:60px"> min</label>
+        <label><input type="checkbox" id="set-fs" ${S.settings.focus_fullscreen !== false ? "checked" : ""}> Full-screen focus mode in battles</label>
         <button class="btn" id="save-set">Save</button></div>
         <div class="row"><a class="btn primary" href="/api/export">Export CSV for Google Sheets</a>
         <label class="btn">Import checklist<input type="file" id="import-file" accept=".csv,.md,.txt" hidden></label></div>
       </section>`;
     $("#save-set").onclick = async () => {
-      try { S.settings = await api("/api/settings", { json: { ...S.settings, sprint_min: +$("#set-sprint").value, break_min: +$("#set-break").value } }); toast("Saved"); }
+      try { S.settings = await api("/api/settings", { json: { sprint_min: +$("#set-sprint").value, break_min: +$("#set-break").value, sound: S.settings.sound, focus_fullscreen: $("#set-fs").checked } }); toast("Saved"); }
       catch (e) { showError(e); }
     };
     $("#import-file").onchange = async (ev) => {
       const fd = new FormData(); fd.append("file", ev.target.files[0]);
       try { const r = await api("/api/import", { method: "POST", body: fd }); toast(`Imported ${r.tasks} tasks`); } catch (e) { showError(e); }
     };
+    renderInventory(await api("/api/inventory"));
   } catch (e) { app.innerHTML = ""; showError(e); }
 }
+function renderInventory(inv) {
+  const eq = inv.equipped || {};
+  $("#inventory").innerHTML = `<h2>Inventory</h2>
+    <p class="eyebrow">Titles</p><div class="row">${inv.titles.length ? inv.titles.map((t) => `<button class="btn ${eq.title === t ? "primary" : ""}" data-title="${esc(t)}">🎖️ ${esc(t)}</button>`).join("") : '<span class="muted">Win battles to find titles.</span>'}</div>
+    <p class="eyebrow" style="margin-top:14px">Themes</p><div class="row">${Object.entries(inv.theme_colors).map(([n, c]) => `<button class="btn ${(eq.theme || "teal") === n ? "primary" : ""}" data-theme="${esc(n)}"><span class="swatch" style="background:${esc(c)}"></span> ${esc(n)}</button>`).join("")}</div>
+    <p class="eyebrow" style="margin-top:14px">Badges</p><div>${inv.badges.length ? inv.badges.map((b) => `🏅 ${esc(b)}`).join(" · ") : '<span class="muted">None yet. Finish a battle without switching tabs.</span>'}</div>
+    <p class="eyebrow" style="margin-top:14px">Bestiary (${inv.bestiary.length})</p><div class="bestiary">${inv.bestiary.map((b) => `<div><span class="big-emoji">${monsterFor(b.enemy)}</span> ${esc(b.enemy)} <span class="stars-sm">${"★".repeat(b.stars)}${"☆".repeat(3 - b.stars)}</span></div>`).join("") || '<span class="muted">Defeated enemies appear here.</span>'}</div>`;
+  document.querySelectorAll("[data-title]").forEach((b) => (b.onclick = async () => {
+    const t = b.dataset.title === eq.title ? "" : b.dataset.title;
+    renderInventory(await api("/api/equip", { json: { title: t } })); loadToday();
+  }));
+  document.querySelectorAll("[data-theme]").forEach((b) => (b.onclick = async () => {
+    const inv2 = await api("/api/equip", { json: { theme: b.dataset.theme } });
+    applyTheme(inv2.theme_colors[b.dataset.theme]); renderInventory(inv2);
+  }));
+}
+
+function applyTheme(color) { if (color) document.documentElement.style.setProperty("--accent", color); }
 
 // ---------- boot ----------
 (async function boot() {
   try {
     const st = await api("/api/status");
     S.settings = st.settings;
+    applyTheme(st.theme_color);
     $("#sound-toggle").textContent = S.settings.sound ? "🔊" : "🔈";
     if (!st.ai.claude.ok) toast(`⚠ ${st.ai.claude.why}`);
     if (!st.has_plan) return renderEmpty();

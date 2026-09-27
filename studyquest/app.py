@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import ai, boss, checker, importer, progress, quest, review, store
+from . import ai, boss, checker, encounter, importer, progress, quest, review, sources, store
 
 STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -44,14 +44,17 @@ def index():
 @app.get("/api/status")
 def api_status():
     has_plan = store.PLAN_FILE.exists()
-    return {"ai": ai.status(), "has_plan": has_plan, "settings": progress.load()["settings"]}
+    p = progress.load()
+    theme = p["settings"].get("equipped", {}).get("theme")
+    return {"ai": ai.status(), "has_plan": has_plan, "settings": p["settings"],
+            "theme_color": encounter.LOOT_THEMES.get(theme) if theme else None}
 
 
 @app.get("/api/today")
 def api_today():
     p, plan = _state()
     return {**quest.today_quest(p, plan), "last": p.get("last"), "level": progress.level_for(p["xp"]),
-            "streak": progress.streak_info(p)}
+            "streak": progress.streak_info(p), "title": p["settings"].get("equipped", {}).get("title")}
 
 
 @app.get("/api/plan")
@@ -161,15 +164,16 @@ def api_sprint(body: Sprint):
 
 
 class Settings(BaseModel):
-    sprint_min: int = Field(ge=5, le=25)
-    break_min: int = Field(ge=3, le=5)
+    sprint_min: int = Field(ge=5, le=60)
+    break_min: int = Field(ge=3, le=10)
     sound: bool
+    focus_fullscreen: bool = True
 
 
 @app.post("/api/settings")
 def api_settings(body: Settings):
     with progress.transaction() as p:
-        p["settings"] = body.model_dump()
+        p["settings"] = {**p["settings"], **body.model_dump()}
         return p["settings"]
 
 
@@ -238,3 +242,96 @@ def api_export():
     p, plan = _state()
     return PlainTextResponse(quest.export_csv(p, plan), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=study_checklist_progress.csv"})
+
+
+# ---------- battles ----------
+
+class BattleStart(BaseModel):
+    task_id: str
+    mode: str = Field("task", pattern="^(task|review)$")
+
+
+@app.post("/api/battle/start")
+def api_battle_start(body: BattleStart):
+    return encounter.start(body.task_id, body.mode)
+
+
+class BattleAnswer(BaseModel):
+    task_id: str
+    idx: int = Field(ge=0, le=20)
+    answer: str = Field(max_length=500)
+
+
+@app.post("/api/battle/answer")
+def api_battle_answer(body: BattleAnswer):
+    return encounter.answer(body.task_id, body.idx, body.answer)
+
+
+@app.post("/api/battle/dispute")
+def api_battle_dispute(body: BattleAnswer):
+    return encounter.dispute(body.task_id, body.idx, body.answer)
+
+
+class BattleRef(BaseModel):
+    task_id: str
+    idx: int = Field(0, ge=0, le=20)
+
+
+@app.post("/api/battle/hint")
+def api_battle_hint(body: BattleRef):
+    return encounter.hint(body.task_id, body.idx)
+
+
+@app.post("/api/battle/focus")
+def api_battle_focus(body: BattleRef):
+    encounter.focus_break(body.task_id)
+    return {"ok": True}
+
+
+class Prefetch(BaseModel):
+    task_ids: list[str] = Field(max_length=5)
+
+
+@app.post("/api/battle/prefetch")
+def api_battle_prefetch(body: Prefetch):
+    encounter.prefetch(body.task_ids)
+    return {"ok": True}
+
+
+@app.get("/api/source")
+def api_source(course: str, file: str, n: int):
+    return sources.page(course, file, n)
+
+
+@app.get("/api/source/img")
+def api_source_img(course: str, file: str, n: int):
+    path = sources.image_path(course, file, n)
+    if not path:
+        raise HTTPException(404, "No image for this page")
+    return FileResponse(path, headers={"Cache-Control": "max-age=86400"})
+
+
+@app.get("/api/inventory")
+def api_inventory():
+    return encounter.inventory(progress.load())
+
+
+class Equip(BaseModel):
+    title: str | None = Field(None, max_length=60)
+    theme: str | None = Field(None, max_length=20)
+
+
+@app.post("/api/equip")
+def api_equip(body: Equip):
+    with progress.transaction() as p:
+        inv = p.get("loot", {"titles": [], "themes": ["teal"]})
+        eq = p["settings"].setdefault("equipped", {})
+        if body.title is not None:
+            if body.title and body.title not in inv["titles"]:
+                raise HTTPException(400, "You haven't found that title yet.")
+            eq["title"] = body.title
+        if body.theme is not None:
+            if body.theme not in inv["themes"]:
+                raise HTTPException(400, "You haven't found that theme yet.")
+            eq["theme"] = body.theme
+        return encounter.inventory(p)

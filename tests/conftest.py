@@ -35,6 +35,25 @@ class FakeAI:
             n = 3 if "3 short retrieval" in prompt else 1
             return json.dumps({"questions": [{"q": f"Q{i + 1}?", "answer": f"A{i + 1}", "type": "formula",
                                               "source": source} for i in range(n)]})
+        if prompt.startswith("You design a short learning battle"):
+            src2 = source or None
+            return json.dumps({"enemy": "Gradient Golem", "lesson": {"title": "Grad", "points": ["p1"], "formula": "D_u f = ∇f·u",
+                               "example": {"problem": "e", "steps": ["s"], "answer": "a"}},
+                               "problems": [
+                {"type": "mcq", "prompt": "Unit?", "choices": ["no", "yes", "maybe", "?"], "answer": 1, "difficulty": 1,
+                 "hints": ["h1", "h2", "sol"], "explain": "because", "source": src2},
+                {"type": "numeric", "prompt": "D_u f?", "answer": "-1", "difficulty": 2, "hints": ["h1", "h2", "sol"],
+                 "explain": "x", "source": src2},
+                {"type": "expression", "prompt": "f_x of x^2 y?", "answer": "2*x*y", "difficulty": 2,
+                 "hints": ["h1", "h2", "sol"], "explain": "x", "source": {"file": "made-up.pdf", "n": 9}},
+                {"type": "multi", "prompt": "grad?", "answer": "(2, -2, -1)", "difficulty": 3, "hints": ["h1", "h2", "sol"],
+                 "explain": "x", "source": src2},
+                {"type": "numeric", "prompt": "broken key", "answer": "two and a half", "difficulty": 3,
+                 "hints": ["h"], "explain": "x"}]})
+        if prompt.startswith("Grade a one-line"):
+            return json.dumps({"score": 1.0 if "CORRECT" in prompt else 0.0, "feedback": "ok"})
+        if prompt.startswith("An auto-grader marked"):
+            return json.dumps({"student_correct": "UPHOLD" in prompt, "reason": "equivalent form"})
         if prompt.startswith("Grade a student"):
             items = json.loads(re.search(r"Items: (\[.*?\])\n", prompt, re.S).group(1))
             ok = [("CORRECT" in it["student"]) for it in items]
