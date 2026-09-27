@@ -125,7 +125,12 @@ async function renderQuest() {
   const where = t.last ? `<button class="btn link" id="where">Where was I?</button>` : "";
   const qw = !LS.get(`qw-${t.date}`, false) && t.label === "today" ? `<button class="btn link" id="qw">⚡ 3 quick wins</button>` : "";
   const fighting = task.battle === "fighting";
+  const [bounty, runState] = await Promise.all([bountiesCard(), api("/api/run").catch(() => ({ run: null }))]);
+  G.run = runState.run;
+  const runBtn = G.run ? `<button class="btn primary big" id="run">${G.run.offer?.length ? "🎁 Choose your perk" : `▶ Continue run · floor ${G.run.floor + 1}/${G.run.floors}`}</button>`
+    : `<button class="btn primary big" id="run">▶ Start a run <span class="small">(up to 4 floors, perks, a chest)</span></button>`;
   app.innerHTML = `
+    ${riftBanner(t.rift)}
     <section class="card" id="task-card">
       <p class="eyebrow">${t.label === "today" ? "Today's floor" : "Next floor"} · ${esc(s.date_label)} · ${esc(s.time)} · ${esc(s.subject)}</p>
       <h2>${esc(s.session)}</h2>
@@ -133,11 +138,17 @@ async function renderQuest() {
       <div class="path">${nodes}</div>
       <p class="eyebrow">Encounter ${S.taskIndex + 1} of ${s.total} ${task.status === "review" ? "· 🔁 rematch" : ""}</p>
       <div class="task-text">${esc(task.text)}</div>
-      <div class="row"><button class="btn primary big" id="start">${task.kind === "action" ? "📌 Mark with proof" : fighting ? "⚔️ Resume battle" : "⚔️ Enter battle"}</button></div>
+      <div class="row">${runBtn}</div>
+      <div class="row"><button class="btn" id="start">${task.kind === "action" ? "📌 Mark with proof" : fighting ? "⚔️ Resume this battle" : "⚔️ Just this one"}</button>
+        ${G.run ? `<button class="btn link" id="abandon">End run</button>` : ""}</div>
       <div class="row spread"><span>${where}${qw}</span><span><button class="btn link" id="skip">Other encounter ›</button></span></div>
       <div id="help"></div>
       ${t.backlog.tasks ? `<p class="muted small" style="margin-top:14px">${t.backlog.tasks} earlier encounter(s) still open. They're on the Map.</p>` : ""}
-    </section>`;
+    </section>${bounty}`;
+  bindBounties();
+  $("#run").onclick = () => (G.run ? (G.run.offer?.length ? renderPerkDraft(G.run) : nextFloor()) : startRun());
+  if ($("#abandon")) $("#abandon").onclick = async () => { const r = await api("/api/run/end", { method: "POST" }); renderRunSummary(r.run); };
+  if (!LS.get(`greeted-${t.date}`, false)) { LS.set(`greeted-${t.date}`, true); vex("greet", $("#task-card"), true); }
   $("#start").onclick = () => (task.kind === "action" ? startCheck(task) : startBattle(task));
   $("#skip").onclick = () => { S.taskIndex = nextIndex(s.tasks, S.taskIndex); renderQuest(); };
   document.querySelectorAll(".node").forEach((n) => (n.onclick = () => { S.taskIndex = +n.dataset.i; renderQuest(); }));
@@ -248,13 +259,16 @@ async function submitCheck(ev) {
   try { handleResult(await api("/api/check/submit", { method: "POST", body: fd })); }
   catch (e) { $("#submit-check").disabled = false; $("#submit-check").textContent = "Check"; showError(e, $(".card")); }
 }
-function celebrate(events) {
-  let xp = 0;
+function celebrate(events, quiet = false) {
+  let xp = 0; const extra = [];
   for (const e of events || []) {
     if (e.type === "xp") xp += e.amount;
-    if (e.type === "level_up") { beep("level"); setTimeout(() => toast(`⭐ Level ${e.level}!`), 1400); }
+    if (e.type === "level_up") { FX.play("kill"); setTimeout(() => toast(`⭐ Level ${e.level}!`), 1400); }
+    if (e.type === "shard") { FX.play("shard"); extra.push(`+${e.amount} ◆`); }
+    if (e.type === "key") extra.push("🔑 Key!");
+    if (e.type === "bounty") extra.push(`📜 Bounty done: ${e.text}`);
   }
-  if (xp) { beep("win"); toast(`+${xp} XP`); }
+  if (xp || extra.length) { if (!quiet) beep("win"); toast([xp ? `+${xp} XP` : "", ...extra].filter(Boolean).join("  ·  ")); }
   loadToday().catch(() => {}); // refresh the HUD (XP bar, streak, review badge)
 }
 function handleResult(r) {
@@ -436,12 +450,13 @@ async function renderStats() {
         <div class="row"><label>Campfire every <input type="number" id="set-sprint" min="5" max="60" value="${S.settings.sprint_min}" style="width:70px"> min</label>
         <label>for <input type="number" id="set-break" min="3" max="10" value="${S.settings.break_min}" style="width:60px"> min</label>
         <label><input type="checkbox" id="set-fs" ${S.settings.focus_fullscreen !== false ? "checked" : ""}> Full-screen focus mode in battles</label>
+        <label>Effects <select id="set-fx">${["full", "calm", "off"].map((m) => `<option ${S.settings.fx === m ? "selected" : ""}>${m}</option>`).join("")}</select></label>
         <button class="btn" id="save-set">Save</button></div>
         <div class="row"><a class="btn primary" href="/api/export">Export CSV for Google Sheets</a>
         <label class="btn">Import checklist<input type="file" id="import-file" accept=".csv,.md,.txt" hidden></label></div>
       </section>`;
     $("#save-set").onclick = async () => {
-      try { S.settings = await api("/api/settings", { json: { sprint_min: +$("#set-sprint").value, break_min: +$("#set-break").value, sound: S.settings.sound, focus_fullscreen: $("#set-fs").checked } }); toast("Saved"); }
+      try { S.settings = await api("/api/settings", { json: { sprint_min: +$("#set-sprint").value, break_min: +$("#set-break").value, sound: S.settings.sound, focus_fullscreen: $("#set-fs").checked, fx: $("#set-fx").value } }); toast("Saved"); }
       catch (e) { showError(e); }
     };
     $("#import-file").onchange = async (ev) => {

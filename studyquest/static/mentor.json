@@ -1,0 +1,60 @@
+{
+  "greet": [
+    "Back at the forge. Let's see what the Rift sends today.",
+    "Tea's hot, enemies are cold. Pick a floor.",
+    "Every exam I failed started with 'I'll study later'. Not you. Not today.",
+    "One run. Twenty-five minutes. Then we talk."
+  ],
+  "first_crit": [
+    "That's a crit! Momentum is the best teacher you've got.",
+    "Three clean in a row. Now they're scared of you.",
+    "See that? Nobody hands you crits. You earned that one."
+  ],
+  "three_misses": [
+    "Three misses. Stop and look at the unit vector: did you divide by its length?",
+    "Slow down: write the formula first, then plug in. The formula is on the scroll.",
+    "Check signs before arithmetic. It's almost always a sign.",
+    "Take the nudge hint. A 25% haircut beats guessing."
+  ],
+  "hint_used": [
+    "Good. Asking is a skill, not a weakness.",
+    "Read the hint, then close your eyes and say the next step out loud.",
+    "Hints are borrowed strength. Pay it back on the next problem."
+  ],
+  "win": [
+    "Down it goes. Write the key formula once on paper before the next one.",
+    "Clean work. Your future self on exam day says thanks.",
+    "Another one for the bestiary. They remember you now."
+  ],
+  "escaped": [
+    "It ran. You kept the notes. They'll be sharper next time.",
+    "Losing a fight isn't losing the war. The rematch has fresh problems.",
+    "Not today. Look at the worked solutions, then we go again tomorrow."
+  ],
+  "perk": [
+    "Floor cleared. Take one of these trinkets.",
+    "I found these in the rubble. Choose wisely, or at least choose.",
+    "Loot break. Pick the one that fits how you fight."
+  ],
+  "tab_return": [
+    "Welcome back. The enemy waited. So did I.",
+    "Distracted? Happens. Read the question again, fresh eyes.",
+    "You're back. Let's finish this one before anything else."
+  ],
+  "run_done": [
+    "Run complete. That's real practice, not just time spent.",
+    "Floors cleared. Go stretch: the Rift can wait ten minutes."
+  ],
+  "long_session": [
+    "Ninety minutes in. Stopping now banks the win; your memory consolidates while you rest.",
+    "You've been at it a long time. The best move now is a real break."
+  ],
+  "loading": [
+    "While it loads: say the key formula of the last topic out loud, from memory.",
+    "Grab paper and a pen. Real engineers solve on paper, then type the answer.",
+    "Tip: numbers like 5/√2 can be typed as 5/sqrt(2). Points as (1, -2).",
+    "Tip: wrong twice? Read the worked solution slowly. That's where the learning is.",
+    "Quick check: what does the gradient point toward? (Think, don't look.)",
+    "Tip: hints cost damage, never XP. Use them when stuck for more than 2 minutes."
+  ]
+}

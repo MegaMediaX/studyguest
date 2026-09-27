@@ -16,28 +16,44 @@ const FORMAT_HINT = {
   short: "One line in your own words",
 };
 
-async function startBattle(task, mode = "task") {
+async function startBattle(task, mode = "task", runId = null) {
   S.phase = "battle";
-  loading(`Summoning the enemy for “${task.text}”…`);
+  G.saidThisBattle = 0;
+  loading(task.text ? `Summoning the enemy for “${task.text}”…` : "Descending to the next floor…");
+  vex("loading", $(".card"), true); G.saidThisBattle = 0;
   try {
-    const r = await api("/api/battle/start", { json: { task_id: task.id, mode } });
+    const [r, econ] = await Promise.all([api("/api/battle/start", { json: { task_id: task.id, mode, run_id: runId } }),
+      api("/api/chest").catch(() => ({ economy: {} }))]);
+    B.econ = econ.economy || {};
     if (r.state === "already_done") { toast("Already defeated ✅"); S.phase = "card"; return renderQuest(); }
     if (r.state === "action") { S.phase = "card"; return startCheck(task); }
-    B.data = r; B.phase = r.problem && r.problem.number > 1 ? "problem" : "lesson";
+    B.data = r; B.phase = (r.problem && r.problem.number > 1) || r.rules?.gambit ? "problem" : "lesson";
+    B.qStart = Date.now() - (r.elapsed || 0) * 1000;
     enterFocus();
     renderBattle();
   } catch (e) { S.phase = "card"; app.innerHTML = `<section class="card"></section>`; showError(e, $(".card")); addBack($(".card")); }
 }
 
-function hpBar(hp) {
+function hpBar(hp, ghost) {
   const pct = hp.max ? Math.round((100 * hp.now) / hp.max) : 0;
-  return `<div class="hp"><div class="hp-fill" style="width:${pct}%"></div><span>${hp.now} / ${hp.max} HP</span></div>`;
+  const prev = B.prevPct ?? pct; B.prevPct = pct;
+  // ghost: where your best past attempt had the enemy's HP after this many problems
+  let ghostMark = "";
+  if (ghost && B.data?.problem) {
+    const done = (B.data.problem.number || 1) - 1;
+    const dealt = ghost.per_q.slice(0, done).reduce((a, b) => a + b, 0) * 100;
+    const gp = Math.max(0, Math.round((100 * (hp.max - dealt)) / hp.max));
+    ghostMark = `<div class="ghost-mark" style="left:${gp}%" title="Your ghost (${esc(ghost.at.slice(0, 10))})">👻</div>`;
+  }
+  return `<div class="hp"><div class="hp-trail" style="width:${prev}%"></div><div class="hp-fill" style="width:${pct}%"></div>${ghostMark}<span>${hp.now} / ${hp.max} HP</span></div>`;
 }
-function enemyPanel(d) {
+function enemyPanel(d, showIntent = true) {
   const combo = d.combo >= 2 ? `<span class="combo">🔥 x${d.combo}${d.combo >= 3 ? " CRIT ready" : ""}</span>` : "";
+  const affix = d.affix ? `<span class="affix">${{ armored: "🛡️ Armored", timed: "⏳ Timed", demands_proof: "📜 Elite: demands proof" }[d.affix] || ""}</span>` : "";
+  const intent = showIntent && d.intent && B.phase === "problem" ? `<div class="intent">${d.intent.icon} ${esc(d.intent.text)}</div>` : "";
   return `<div class="enemy">
-      <div class="monster" id="monster" aria-hidden="true">${monsterFor(d.enemy)}</div>
-      <div class="enemy-info"><div class="enemy-name">${esc(d.enemy)}</div>${hpBar(d.hp)}
+      <div class="monster-wrap">${intent}<div class="monster" id="monster" aria-hidden="true">${monsterFor(d.enemy)}</div></div>
+      <div class="enemy-info"><div class="enemy-name">${esc(d.enemy)} ${affix}</div>${hpBar(d.hp, d.ghost)}
         <div class="muted small">${esc(d.task.text)} ${d.attempt > 1 ? "· rematch" : ""} ${combo}</div></div>
       <button class="btn link" id="exit-battle" title="Leave (progress is kept)">✕</button>
     </div>`;
@@ -46,9 +62,10 @@ function enemyPanel(d) {
 function renderBattle(extra = "") {
   const d = B.data;
   const body = B.phase === "lesson" ? lessonHtml(d) : problemHtml(d.problem);
-  app.innerHTML = `<section class="card battle">${enemyPanel(d)}${d.notice ? `<div class="notice">${esc(d.notice)}</div>` : ""}${extra}${body}</section>`;
+  app.innerHTML = `<section class="card battle">${d.run_id && G.run ? runBar(G.run) : ""}${enemyPanel(d)}${d.notice ? `<div class="notice">${esc(d.notice)}</div>` : ""}${extra}${body}</section>`;
   $("#exit-battle").onclick = () => { exitFocus(); S.phase = "card"; go("quest"); };
   if (B.phase === "lesson") bindLesson(d); else bindProblem(d.problem);
+  if (d.ghost && d.problem?.number === 1 && B.phase === "problem") toast(`👻 Your ghost from ${d.ghost.at.slice(5, 10)} is here. Beat it.`);
 }
 
 // ---------- lesson ----------
@@ -66,7 +83,7 @@ function lessonHtml(d) {
     <div class="row"><button class="btn primary big" id="fight">⚔️ Fight!</button></div>`;
 }
 function bindLesson(d) {
-  $("#fight").onclick = () => { B.phase = "problem"; enterFocus(); renderBattle(); };
+  $("#fight").onclick = () => { B.phase = "problem"; B.qStart = Date.now(); enterFocus(); renderBattle(); };
   if ($("#read-src")) $("#read-src").onclick = () => openReader(d.pages, 0);
 }
 
@@ -80,14 +97,17 @@ function problemHtml(p) {
       : `<input type="text" id="ans" autocomplete="off" spellcheck="false" placeholder="${esc(FORMAT_HINT[p.type])}">`;
   const src = p.source ? `<button class="btn link small" id="src-link">📄 ${esc(p.source.file)} · ${esc(p.source.unit)} ${p.source.n}</button>` : "";
   return `<div class="problem">
-      <p class="eyebrow">Problem ${p.number} of ${p.total} · ${"★".repeat(p.difficulty)}${"☆".repeat(3 - p.difficulty)} ${B.data.tries ? "· 2nd try (half damage)" : ""}</p>
+      <p class="eyebrow">Problem ${p.number} of ${p.total} · ${"★".repeat(p.difficulty)}${"☆".repeat(3 - p.difficulty)} ${B.data.tries ? "· 2nd try (half damage)" : ""}
+        ${B.data.timer ? `· <span id="qtimer" class="qtimer"></span>` : ""}</p>
       <div class="prompt">${esc(p.prompt)}</div>
-      ${src}
+      ${src} <button class="btn link small" id="scroll-link">📜 Lesson</button>
       <div id="hints"></div>
       ${input}
       <div class="row spread">
         <span>${p.type !== "mcq" ? `<button class="btn primary big" id="attack">Attack ⏎</button>` : ""}</span>
-        <span><button class="btn" id="hint-btn">💡 Hint <span class="muted small">(${p.hints_available - B.data.hint_level} left)</span></button>
+        <span>${B.econ?.consumables?.retry_token && B.data.tries === 1 ? `<button class="btn" id="tok-retry">↺ Retry token</button>` : ""}
+        ${B.econ?.consumables?.hint_token && !B.data.rules?.no_hints ? `<button class="btn" id="tok-hint">💡 Hint token</button>` : ""}
+        ${B.data.rules?.no_hints ? `<span class="muted small">💎 Glass Cannon: no hints</span>` : `<button class="btn" id="hint-btn">💡 Hint <span class="muted small">(${p.hints_available - B.data.hint_level} left${B.data.rules?.free_hints ? ", next free" : ""})</span></button>`}
         <button class="btn link" id="explain-btn">Explain differently</button></span>
       </div>
       <div id="fx"></div>
@@ -99,7 +119,14 @@ function bindProblem(p) {
   if (ans) { ans.focus(); ans.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitAnswer(ans.value); } }; }
   if ($("#attack")) $("#attack").onclick = () => submitAnswer(ans.value);
   document.querySelectorAll(".choice").forEach((b) => (b.onclick = () => submitAnswer(b.dataset.i === undefined ? "" : String(+b.dataset.i + 1))));
-  $("#hint-btn").onclick = () => takeHint(p);
+  if ($("#hint-btn")) $("#hint-btn").onclick = () => takeHint(p);
+  $("#scroll-link").onclick = () => { B.phase = "lesson"; renderBattle(); $("#fight").textContent = "⚔️ Back to the fight"; };
+  for (const [id, kind] of [["#tok-retry", "retry_token"], ["#tok-hint", "hint_token"]]) {
+    if ($(id)) $(id).onclick = async () => {
+      try { const v = await api("/api/battle/token", { json: { task_id: B.data.task.id, kind } }); B.econ.consumables[kind]--; B.data = { ...B.data, ...v }; renderBattle(); toast(kind === "retry_token" ? "↺ Miss undone" : "💡 Next hint is free"); }
+      catch (e) { toast(e.message); }
+    };
+  }
   $("#explain-btn").onclick = () => explainDifferently(p);
   if ($("#src-link")) $("#src-link").onclick = () => {
     const i = B.data.pages.findIndex((x) => x.file === p.source.file && x.n === p.source.n);
@@ -135,15 +162,17 @@ function handleHit(r, p) {
   const prev = B.data;
   B.data = { ...prev, ...r, task: prev.task, lesson: prev.lesson, pages: prev.pages };
   if (r.result === "miss") {
-    beep("lose");
+    FX.play("parry");
     renderBattle();
     floatDamage("🛡 PARRY", "parry"); $("#monster")?.classList.add("block");
+    if (r.misses >= 3) vex("three_misses", $(".battle"));
     $("#fx").innerHTML = `<div class="helpbox">${esc(r.feedback)}</div>${disputeBtn()}`;
     bindDispute(p);
     return;
   }
-  celebrate(r.events || []);
-  if (r.result === "hit") beep(r.crit ? "level" : "win"); else beep("lose");
+  celebrate(r.events || [], true);
+  if (r.result === "hit") FX.play(r.crit ? "crit" : "hit", prev.combo); else FX.play("miss");
+  if (r.crit) { FX.flash(); FX.screenShake(); }
   const reveal = r.reveal ? `<div class="reveal"><p class="eyebrow">${r.result === "hit" ? "Why it's right" : "The answer"}</p>
       <p><b>${esc(r.reveal.answer)}</b></p>${r.reveal.explain ? `<p>${esc(r.reveal.explain)}</p>` : ""}
       ${r.reveal.solution ? `<details><summary>Worked solution</summary><p class="pre">${esc(r.reveal.solution)}</p></details>` : ""}
@@ -153,12 +182,13 @@ function handleHit(r, p) {
   // show the result on the finished problem, then move on
   app.querySelector(".problem").innerHTML = `<div class="prompt">${esc(p.prompt)}</div>
     <div class="hit-banner ${r.result}">${r.result === "hit" ? (r.crit ? `💥 CRITICAL! −${r.damage}` : `⚔️ Hit! −${r.damage}`) : "💨 Missed"}</div>
-    ${reveal}<div class="row">${next}</div><div id="fx"></div>`;
-  $(".enemy").outerHTML = enemyPanel(B.data);
+    ${(r.notes || []).map((n) => `<p class="muted">${esc(n)}</p>`).join("")}${reveal}<div class="row">${next}</div><div id="fx"></div>`;
+  $(".enemy").outerHTML = enemyPanel(B.data, false);
   $("#exit-battle").onclick = () => { exitFocus(); S.phase = "card"; go("quest"); };
   if (r.result === "hit") { floatDamage(`−${r.damage}`, r.crit ? "crit" : "hit"); $("#monster").classList.add("shake"); }
+  if (r.crit && !B.critSaid) { B.critSaid = true; vex("first_crit", $(".battle")); }
   if (r.result === "fail") bindDispute(p);
-  const go_on = () => (r.outcome ? renderOutcome(r) : renderBattle());
+  const go_on = () => { B.qStart = Date.now(); return r.outcome ? renderOutcome(r) : renderBattle(); };
   $("#next").onclick = go_on; $("#next").focus();
 }
 
@@ -179,8 +209,9 @@ async function takeHint(p) {
   try {
     const r = await api("/api/battle/hint", { json: { task_id: B.data.task.id, idx: p.idx } });
     if (!r.hint) return toast("No more hints");
+    vex("hint_used", $(".battle"));
     B.data.hint_level = r.hint_level; B.data.combo = 0;
-    const label = ["", "Nudge (−25% dmg)", "Next step (−50% dmg)", "Worked solution (0 dmg, but you'll learn it)"][r.hint_level];
+    const label = r.free ? "Free hint" : ["", "Nudge (−25% dmg)", "Next step (−50% dmg)", "Worked solution (0 dmg, but you'll learn it)"][r.hint_level];
     $("#hints").insertAdjacentHTML("beforeend", `<div class="helpbox"><b>💡 ${label}</b><p class="pre">${esc(r.hint)}</p></div>`);
     $("#hint-btn").innerHTML = `💡 Hint <span class="muted small">(${p.hints_available - r.hint_level} left)</span>`;
   } catch (e) { showError(e, $(".battle")); }
@@ -209,21 +240,43 @@ function renderOutcome(r) {
         <div class="stars">${stars}</div>
         <p class="muted">Best combo x${r.best_combo}${r.focus_breaks === 0 ? " · 🎯 zero tab switches" : ""}</p>
         ${loot ? `<p class="eyebrow">Loot</p><div class="loots">${loot}</div>` : ""}
-        <div class="row" style="justify-content:center"><button class="btn primary big" id="next">Next battle →</button></div>
+        ${r.ghost_result ? `<p>${r.ghost_result.surpassed ? `👻 You beat your ghost from ${esc(r.ghost_result.date.slice(5))}! +1 ◆` : `👻 Your ghost (${esc(r.ghost_result.date.slice(5))}) did better. Next time.`}</p>` : ""}
+        <div class="row" style="justify-content:center"><button class="btn primary big" id="next">${nextLabel(r)}</button></div>
       </section>`;
-    beep("level");
+    FX.play("kill");
+    vex("win", $(".victory"));
   } else {
     app.innerHTML = `<section class="card center">
         <div class="monster">${monsterFor(d.enemy)}💨</div>
         <h1 class="verdict-warn">${esc(d.enemy)} escaped</h1>
         <p>No XP lost. ${r.rematch ? "Rematch any time; the next fight has fresh problems." : "It's in your review queue: it comes back tomorrow, then in 3 and 7 days."}</p>
-        <div class="row" style="justify-content:center"><button class="btn primary big" id="next">Continue</button></div>
+        <div class="row" style="justify-content:center"><button class="btn primary big" id="next">${nextLabel(r)}</button></div>
       </section>`;
+    FX.play("lose");
+    vex("escaped", $(".card"));
   }
-  $("#next").onclick = () => { S.taskIndex = null; go(S.view === "review" ? "review" : "quest"); };
+  $("#next").onclick = () => {
+    S.taskIndex = null; B.critSaid = false; B.prevPct = null;
+    if (r.run?.state === "done") return renderRunSummary(r.run);
+    if (r.run?.offer?.length) return renderPerkDraft(r.run);
+    go(S.view === "review" ? "review" : "quest");
+  };
   $("#next").focus();
   maybeCampfire();
 }
+
+function nextLabel(r) {
+  if (r.run?.state === "done") return "🏁 Run summary";
+  if (r.run?.offer?.length) return "🎁 Choose a perk";
+  return r.outcome === "won" ? "Next battle →" : "Continue";
+}
+
+// question countdown for timed enemies
+setInterval(() => {
+  const el = $("#qtimer"); if (!el || !B.data?.timer) return;
+  const left = Math.round(B.data.timer - (Date.now() - B.qStart) / 1000);
+  el.textContent = left > 0 ? `⏳ ${fmt(left)}` : "⏳ late: half damage"; el.classList.toggle("late", left <= 0);
+}, 500);
 
 // ---------- in-app reader (no other tabs needed) ----------
 function openReader(pages, i) {
@@ -270,6 +323,7 @@ document.addEventListener("visibilitychange", () => {
   if (!B.left) return;
   const away = Math.round((Date.now() - B.left) / 1000); B.left = null;
   if (away < 3) return;
+  G.saidThisBattle = 0;
   api("/api/battle/focus", { json: { task_id: B.data.task.id } }).catch(() => {});
   const p = B.data.problem;
   document.body.insertAdjacentHTML("beforeend", `<div id="welcome" class="overlay"><div class="card center">

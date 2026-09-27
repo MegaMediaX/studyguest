@@ -26,11 +26,11 @@ Course folders (`MATH202 - Calculus II/`, …) go next to it too. Map them in `c
 
 ## How to play
 
-1. Open **Quest**: one task card. Press **Start**, write your first step, and a 12-minute sprint begins.
-2. When the timer ends, take the break, then **Check**: answer 2–3 recall questions (or give a final answer / photo).
-3. Pass at 70% or more for ✅ and XP. A miss gives you a hint, 60 s, and one retry. Two misses make it 🔁, and it comes back in 1, 3 and 7 days.
-4. Stuck? **I'm stuck** gives the smallest next step. **Explain differently** asks Gemini for another angle.
-5. End of session: the verdict shows what's left and where to fit it. **Export CSV** puts the `Done` column back into your Google Sheet.
+1. **Quest** shows today's floor. Press **▶ Start a run**: up to 4 enemies (floor 1 is a due rematch, the last one is an elite that demands a written proof).
+2. Each battle opens with a 1-minute lesson scroll. **📖 Read the course pages here** shows the real PDF pages inside the app, so you don't need another window.
+3. Solve the problems on paper and type the answer. Numbers, expressions, points and multiple choice are graded instantly. Right answers deal damage, 3 in a row gives crits, and hints cost damage, never XP.
+4. Between floors you pick 1 of 3 perks. Five clean hits in a row give a key shard; 3 shards make a key, and a key opens a chest (odds shown, nothing to buy). Daily bounties give shards too.
+5. Lose a fight and you keep your XP. The enemy comes back as a rematch with fresh problems, and on rematches your ghost shows how your past self did. **Export CSV** puts the `Done` column back into your Google Sheet.
 
 Terminal: `/quest-today`, `/quest-check <task>`, `/quest-status`, `/quest-import <file>`, `/quest-export`.
 

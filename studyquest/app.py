@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import ai, boss, checker, encounter, importer, progress, quest, review, sources, store
+from . import ai, boss, bounties, checker, encounter, importer, progress, quest, review, run, sources, store
 
 STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -15,6 +15,15 @@ IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/heic": ".heic",
 
 app = FastAPI(title="StudyQuest")
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+@app.middleware("http")
+async def _no_stale_assets(request: Request, call_next):
+    """Revalidate app files on every load so an update never runs against old JS."""
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.exception_handler(ai.AIUnavailable)
@@ -25,6 +34,11 @@ async def _ai_down(_: Request, e: ai.AIUnavailable):
 @app.exception_handler(KeyError)
 async def _missing(_: Request, e: KeyError):
     return JSONResponse({"error": str(e).strip("'\"")}, status_code=404)
+
+
+@app.exception_handler(ValueError)
+async def _bad(_: Request, e: ValueError):
+    return JSONResponse({"error": str(e)}, status_code=409)
 
 
 @app.exception_handler(FileNotFoundError)
@@ -168,6 +182,7 @@ class Settings(BaseModel):
     break_min: int = Field(ge=3, le=10)
     sound: bool
     focus_fullscreen: bool = True
+    fx: str = Field("full", pattern="^(full|calm|off)$")
 
 
 @app.post("/api/settings")
@@ -249,11 +264,12 @@ def api_export():
 class BattleStart(BaseModel):
     task_id: str
     mode: str = Field("task", pattern="^(task|review)$")
+    run_id: str | None = Field(None, max_length=12)
 
 
 @app.post("/api/battle/start")
 def api_battle_start(body: BattleStart):
-    return encounter.start(body.task_id, body.mode)
+    return encounter.start(body.task_id, body.mode, body.run_id)
 
 
 class BattleAnswer(BaseModel):
@@ -335,3 +351,76 @@ def api_equip(body: Equip):
                 raise HTTPException(400, "You haven't found that theme yet.")
             eq["theme"] = body.theme
         return encounter.inventory(p)
+
+
+class Token(BaseModel):
+    task_id: str
+    kind: str = Field(pattern="^(hint_token|retry_token)$")
+
+
+@app.post("/api/battle/token")
+def api_battle_token(body: Token):
+    return encounter.use_token(body.task_id, body.kind)
+
+
+# ---------- runs, bounties, chests ----------
+
+@app.get("/api/run")
+def api_run():
+    r = progress.load().get("run")
+    return {"run": run.public(r) if r and r["state"] == "active" else None}
+
+
+@app.post("/api/run/start")
+def api_run_start():
+    plan = progress.load_plan()
+    with progress.transaction() as p:
+        return {"run": run.public(run.start(p, plan))}
+
+
+class PerkPick(BaseModel):
+    perk_id: str = Field(max_length=30)
+
+
+@app.post("/api/run/perk")
+def api_run_perk(body: PerkPick):
+    with progress.transaction() as p:
+        return {"run": run.choose_perk(p, body.perk_id)}
+
+
+@app.post("/api/run/end")
+def api_run_end():
+    with progress.transaction() as p:
+        if not p.get("run") or p["run"]["state"] != "active":
+            raise KeyError("No active run.")
+        return {"run": run.finish(p, abandoned=True)}
+
+
+@app.get("/api/bounties")
+def api_bounties():
+    plan = progress.load_plan()
+    with progress.transaction() as p:
+        b = bounties.today_bounties(p, plan)
+        return {**b, "economy": p.get("economy", {"shards": 0, "keys": 0, "consumables": {}})}
+
+
+class Reroll(BaseModel):
+    bounty_id: str = Field(max_length=5)
+
+
+@app.post("/api/bounties/reroll")
+def api_bounty_reroll(body: Reroll):
+    plan = progress.load_plan()
+    with progress.transaction() as p:
+        return bounties.reroll(p, plan, body.bounty_id)
+
+
+@app.get("/api/chest")
+def api_chest():
+    return {**run.odds(), "economy": progress.load().get("economy", {"shards": 0, "keys": 0, "consumables": {}})}
+
+
+@app.post("/api/chest/open")
+def api_chest_open():
+    with progress.transaction() as p:
+        return run.open_chest(p)

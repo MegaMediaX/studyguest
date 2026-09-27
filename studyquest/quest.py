@@ -47,7 +47,23 @@ def today_quest(p: dict, plan: dict) -> dict:
         "next_session": session_view(p, upcoming, with_tasks=False) if upcoming else None,
         "backlog": {"sessions": len(backlog), "tasks": sum(len(progress.session_left(p, s)) for s in backlog)},
         "review_due": len(review.due_cards(p)),
+        "rift": rift(p, plan, current),
     }
+
+
+def rift(p: dict, plan: dict, session: dict | None) -> dict | None:
+    """The next exam for this session's course, told as a world threat: only what's sealed and what's left."""
+    from .corpus import course_for_subject
+    if not session:
+        return None
+    course = course_for_subject(session["subject"])
+    exam = next((e for e in exams_countdown() if e["course"] == course), None)
+    if not exam:
+        return None
+    before = [s for s in plan["sessions"] if s["subject"] == session["subject"] and s["date"] and s["date"] < exam["date"]]
+    sealed = sum(1 for s in before if not progress.session_left(p, s))
+    nxt = next((s["session"] for s in before if progress.session_left(p, s)), None)
+    return {"name": exam["name"], "days": exam["days"], "sealed": sealed, "total": len(before), "next": nxt}
 
 
 def next_free_slot(plan: dict, session: dict) -> dict | None:

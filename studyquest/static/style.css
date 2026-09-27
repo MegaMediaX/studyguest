@@ -179,3 +179,43 @@ details.example { margin: 10px 0 14px; } details summary { cursor: pointer; colo
 @keyframes starin { from { opacity: 0; transform: scale(2.2) rotate(-30deg); } to { opacity: 1; transform: scale(1); } }
 @keyframes lootin { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }
 @media (max-width: 560px) { .choices { grid-template-columns: 1fr; } .monster { font-size: 3rem; } .node { width: 44px; height: 44px; } }
+
+/* ---------- meta layer ---------- */
+.vex { display: flex; gap: 12px; align-items: flex-start; background: #161a24; border: 1px solid #2b3246; border-radius: 12px;
+  padding: 10px 14px; margin-bottom: 14px; animation: bannerin .35s ease; }
+.vex-face { font-size: 1.8rem; line-height: 1; } .vex p { margin: 2px 0 0; } .vex b { color: var(--gold); font-size: .8rem; letter-spacing: .06em; text-transform: uppercase; }
+.rift { background: linear-gradient(90deg, #1a1030, #121525); border: 1px solid #3b2a5c; border-radius: var(--radius); padding: 14px 20px; margin-bottom: 18px; }
+.rift-top { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.rift-bar { height: 8px; background: #2a1d45; border-radius: 99px; overflow: hidden; margin: 8px 0 6px; }
+.rift-bar div { height: 100%; background: linear-gradient(90deg, #a78bfa, var(--accent)); }
+.econ { font-weight: 700; font-size: .85rem; color: var(--gold); white-space: nowrap; }
+.bounty { padding: 8px 0; border-bottom: 1px solid var(--line); } .bounty:last-of-type { border-bottom: 0; }
+.bounty.done { opacity: .6; }
+.mini-bar { height: 5px; background: var(--line); border-radius: 99px; overflow: hidden; margin-top: 6px; }
+.mini-bar div { height: 100%; background: var(--gold); }
+.runbar { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.pip { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; font-size: .8rem; border: 1px solid var(--line); background: var(--bg); }
+.pip.now { border-color: var(--accent); color: var(--accent); } .pip.won { background: color-mix(in srgb, var(--gold) 20%, var(--bg)); color: var(--gold); }
+.pip.lost { color: var(--muted); } .perks { margin-left: auto; display: flex; gap: 4px; } .perk-chip { font-size: 1.1rem; cursor: help; }
+.perk-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+.perk-card { background: var(--bg); border: 1px solid var(--line); border-radius: 16px; padding: 18px 14px; cursor: pointer; text-align: center;
+  opacity: 0; animation: lootin .45s ease forwards; transition: transform .15s ease, border-color .15s ease; }
+.perk-card:hover, .perk-card:focus-visible { transform: translateY(-4px); border-color: var(--gold); }
+.perk-icon { font-size: 2.4rem; } .perk-card p { margin: 6px 0 0; font-size: .9rem; }
+.monster-wrap { position: relative; text-align: center; }
+.intent { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: .72rem; background: #222838;
+  border: 1px solid var(--line); border-radius: 10px; padding: 3px 8px; margin-bottom: 6px; z-index: 2; }
+.enemy { margin-top: 22px; }
+.affix { font-size: .72rem; font-weight: 700; color: var(--gold); border: 1px solid #5a4a1a; border-radius: 99px; padding: 1px 8px; margin-left: 6px; vertical-align: middle; }
+.hp-trail { position: absolute; inset: 0 auto 0 0; background: #fda4af; opacity: .55; transition: width .6s ease .3s; }
+.hp-fill { position: relative; }
+.ghost-mark { position: absolute; top: -3px; transform: translateX(-50%); font-size: .8rem; opacity: .75; transition: left .4s ease; }
+.qtimer { color: var(--gold); font-weight: 700; } .qtimer.late { color: var(--hp); }
+.chest { font-size: 5rem; display: inline-block; margin: 10px 0; } .chest.wiggle { animation: wiggle .4s ease; }
+.flash { position: fixed; inset: 0; background: #fff; opacity: .5; z-index: 40; pointer-events: none; animation: flashout .18s ease forwards; }
+body.shake-screen main { animation: screenshake .25s ease; }
+@keyframes wiggle { 0%, 100% { transform: rotate(0); } 25% { transform: rotate(-14deg) scale(1.05); } 75% { transform: rotate(12deg) scale(1.05); } }
+@keyframes flashout { to { opacity: 0; } }
+@keyframes screenshake { 0%, 100% { transform: none; } 25% { transform: translate(-4px, 2px); } 50% { transform: translate(4px, -2px); } 75% { transform: translate(-2px, 1px); } }
+@media (max-width: 560px) { .perk-cards { grid-template-columns: 1fr; } }
+.vex { text-align: left; }

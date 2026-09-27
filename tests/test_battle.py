@@ -81,7 +81,7 @@ def test_hints_cost_damage_not_xp(client, imported):
     v = client.post("/api/battle/start", json={"task_id": tid}).json()
     idx = v["problem"]["idx"]
     h = client.post("/api/battle/hint", json={"task_id": tid, "idx": idx}).json()
-    assert h == {"hint_level": 1, "hint": "h1", "last": False}
+    assert h == {"hint_level": 1, "hint": "h1", "last": False, "free": False}
     xp_before = progress.load()["xp"]
     r = _answer(client, tid, v)
     assert r["damage"] == 75 and progress.load()["xp"] >= xp_before

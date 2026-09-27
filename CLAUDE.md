@@ -14,7 +14,11 @@ it runs the app, answers the `/quest-*` commands, and tutors. Gemini (`agy -p`) 
 |---|---|
 | `studyquest/importer.py` | CSV / Google Sheets CSV / markdown checklist → `data/plan.json`; classifies tasks |
 | `studyquest/progress.py` | `data/progress.json`: status, XP, levels, streaks + weekly freeze, overrides, "where was I" |
-| `studyquest/checker.py` | the done-check: questions → grade → pass / hint + retry / 🔁 review |
+| `studyquest/encounter.py` | **battles** (the web done-check): lesson + in-app pages → problems → instant grading, HP = pass threshold |
+| `studyquest/mathcheck.py` | local answer checking (numbers, expressions by random-point evaluation, points, MCQ); strict AST whitelist |
+| `studyquest/run.py`, `perks.py`, `bounties.py` | runs (≤ 4 floors, perk draft), chests (published odds, pity, no dupes), daily bounties, shards/keys |
+| `studyquest/sources.py` | serves course pages as images/text inside the app (looked up via the corpus only) |
+| `studyquest/checker.py` | text done-check used by the terminal `/quest-check` and for 📌 action tasks |
 | `studyquest/review.py` | Leitner spaced review (1/3/7 days), interleaving, daily 3 quick wins |
 | `studyquest/boss.py` | timed mock exam built from past exams |
 | `studyquest/quest.py` | today's quest, session verdict, map, stats, CSV export |
@@ -22,7 +26,8 @@ it runs the app, answers the `/quest-*` commands, and tutors. Gemini (`agy -p`) 
 | `studyquest/corpus.py` | course files → `data/corpus/`; OCR of scanned pages; retrieval |
 | `studyquest/cli.py` | terminal entry used by `.claude/commands/quest-*.md` |
 | `config.json` | courses, file aliases (Fares, Farah, textbook), exam dates, bosses, AI thresholds |
-| `docs/research.md` | evidence behind each ADHD design choice, with verified citations |
+| `docs/research.md` | evidence behind each ADHD/game design choice, with verified citations |
+| `docs/game-design.md` | game design spec: core loop, 22 mechanics, what's built, guardrails |
 
 ## Data files (human-readable JSON, never commit `data/`)
 
@@ -49,6 +54,10 @@ it runs the app, answers the `/quest-*` commands, and tutors. Gemini (`agy -p`) 
 7. `ai.py` runs the CLIs in a temp cwd with `disableAllHooks`, so app calls never trigger the
    SessionEnd work-log hook. Keep it that way.
 8. Show one session at a time; only show the full plan when asked.
+9. Battles: defeating the enemy (≥ 70% of available damage) = passing the check. Escaping twice → 🔁.
+   Hints cost damage, never XP. Loot is cosmetic; consumables only help practise (free hint, undo one miss).
+   Rewards come from correctness and spacing only (see `docs/game-design.md` §5 guardrails). No shame copy.
+10. Everything happens in the app: problems, the source pages (reader), explanations. Don't send the user elsewhere.
 
 ## Common jobs
 
