@@ -2,6 +2,8 @@
 # Start StudyQuest on http://localhost:8765 (local only).
 set -euo pipefail
 cd "$(dirname "$0")"
+# terminals opened without your shell profile miss these; the app needs `claude` and `agy`
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 if [ ! -x .venv/bin/python ]; then
   echo "First run: creating .venv and installing requirements…"
   python3 -m venv .venv

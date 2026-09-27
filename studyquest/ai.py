@@ -18,6 +18,23 @@ from pathlib import Path
 from . import store
 
 
+EXTRA_BIN_DIRS = [Path.home() / ".local/bin", Path("/opt/homebrew/bin"), Path("/usr/local/bin"),
+                  Path.home() / ".npm-global/bin", Path.home() / ".claude/local"]
+
+
+def find_bin(name: str) -> str | None:
+    """PATH first, then the usual install dirs: a terminal started without the user's
+    shell profile (e.g. an IDE or app pane) often lacks ~/.local/bin."""
+    found = shutil.which(name)
+    if found:
+        return found
+    for d in EXTRA_BIN_DIRS:
+        p = d / name
+        if p.is_file() and os.access(p, os.X_OK):
+            return str(p)
+    return None
+
+
 class AIUnavailable(RuntimeError):
     """Raised with a message that is safe to show in the UI."""
 
@@ -32,7 +49,7 @@ def _clean_env() -> dict:
 
 
 def claude_cmd(images: list[Path]) -> list[str]:
-    cmd = ["claude", "-p", "--output-format", "json", "--no-session-persistence", "--strict-mcp-config",
+    cmd = [find_bin("claude") or "claude", "-p", "--output-format", "json", "--no-session-persistence", "--strict-mcp-config",
            "--settings", json.dumps({"disableAllHooks": True})]
     model = _cfg().get("claude_model")
     if model:
@@ -49,7 +66,7 @@ def claude_cmd(images: list[Path]) -> list[str]:
 def gemini_cmd(prompt: str, images: list[Path], effort: str = "medium") -> list[str]:
     # agy's default (high) effort can spend its whole budget thinking and return an empty reply
     timeout = int(_cfg().get("gemini_timeout_s", 150))
-    cmd = ["agy", "-p", prompt, "--output-format", "json", "--print-timeout", f"{timeout}s", "--effort", effort]
+    cmd = [find_bin("agy") or "agy", "-p", prompt, "--output-format", "json", "--print-timeout", f"{timeout}s", "--effort", effort]
     for d in {str(p.parent) for p in images}:
         cmd += ["--add-dir", d]
     return cmd
@@ -141,17 +158,18 @@ def status(refresh: bool = False) -> dict:
     if _status_cache and not refresh:
         return _status_cache
     out = {}
-    if not shutil.which("claude"):
-        out["claude"] = {"ok": False, "why": "`claude` not found on PATH"}
+    claude = find_bin("claude")
+    if not claude:
+        out["claude"] = {"ok": False, "why": "`claude` not found (looked in PATH and ~/.local/bin, /opt/homebrew/bin)"}
     else:
         try:
-            raw = subprocess.run(["claude", "auth", "status"], capture_output=True, text=True, timeout=20,
+            raw = subprocess.run([claude, "auth", "status"], capture_output=True, text=True, timeout=20,
                                  env=_clean_env()).stdout
             ok = bool(json.loads(raw).get("loggedIn"))
             out["claude"] = {"ok": ok, "why": "" if ok else "Claude CLI not logged in: run `claude`, then /login"}
         except Exception as e:  # noqa: BLE001 - any failure here just means "unknown"
             out["claude"] = {"ok": False, "why": f"could not check claude auth: {e}"}
-    out["gemini"] = ({"ok": True, "why": ""} if shutil.which("agy")
+    out["gemini"] = ({"ok": True, "why": ""} if find_bin("agy")
                      else {"ok": False, "why": "`agy` not found: Gemini second opinions are disabled"})
     _status_cache.clear()
     _status_cache.update(out)

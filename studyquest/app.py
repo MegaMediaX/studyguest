@@ -52,7 +52,15 @@ def _state():
 
 @app.get("/")
 def index():
-    return FileResponse(STATIC / "index.html")
+    """index.html with ?v=<mtime> on every asset, so a browser never runs stale JS after an update."""
+    import re
+    from fastapi.responses import HTMLResponse
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+
+    def bust(m: re.Match) -> str:
+        f = STATIC / m.group(2)
+        return f'{m.group(1)}/static/{m.group(2)}?v={int(f.stat().st_mtime) if f.exists() else 0}"'
+    return HTMLResponse(re.sub(r'((?:src|href)=")/static/([\w.\-]+)"', bust, html))
 
 
 @app.get("/api/status")
