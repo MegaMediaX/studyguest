@@ -110,16 +110,17 @@ function problemHtml(p) {
          <p class="fmt" id="fmt">${esc(FORMAT_HINT[p.type])}</p>`;
   const src = p.source ? `<button class="btn" id="src-link">📄 ${esc(p.source.file)} · ${esc(p.source.unit)} ${p.source.n}</button>` : "";
   return `<div class="problem">
-      <p class="eyebrow">Problem ${p.number} of ${p.total} · ${"★".repeat(p.difficulty)}${"☆".repeat(3 - p.difficulty)} ${B.data.tries ? "· 2nd try (half damage)" : ""}
+      <p class="eyebrow">Problem ${p.number} of ${p.total} · difficulty ${"◆".repeat(p.difficulty)}${"◇".repeat(3 - p.difficulty)} ${B.data.tries ? "· 2nd try (half damage)" : ""}
         ${B.data.timer ? `· <span id="qtimer" class="qtimer"></span>` : ""}</p>
       <div class="prompt">${esc(p.prompt)}</div>
-      ${p.unverified ? `<p class="muted small">⚠ Two graders disagreed on this key, so either answer counts.</p>` : ""}
+      ${p.unverified ? `<p class="muted small">⚠ Two graders disagreed on this key, so either answer counts (but it won't count toward ★★★ or seals).</p>` : ""}
+      ${p.work_required ? `<p class="exam-style">📝 Exam-style: solve this on paper and send a photo of your working. Correct method = +25%.</p>` : ""}
       <div id="hints"></div>
       ${input}
       ${p.type !== "mcq" ? `<div class="work">
         <label class="btn" for="work-photo">📷 Photo of your working</label>
         <input type="file" id="work-photo" accept="image/*" capture="environment" hidden>
-        <span class="muted small" id="work-name">${B.photo?.idx === p.idx ? esc(B.photo.file.name) : "Optional: correct method = +25% damage, like the real exam. You can also paste an image."}</span>
+        <span class="muted small" id="work-name">${B.photo?.idx === p.idx ? esc(B.photo.file.name) : p.work_required ? "Required here (or paste an image)." : "Optional: correct method = +25% damage, like the real exam. You can also paste an image."}</span>
         <img id="work-preview" alt="" ${B.photo?.idx === p.idx ? "" : "hidden"}>
       </div>` : ""}
       <div class="row spread">
@@ -177,7 +178,7 @@ document.addEventListener("keydown", (e) => {
   if (i >= 0 && i < B.data.problem.choices.length) submitAnswer(String(i + 1));
 });
 
-async function submitAnswer(text) {
+async function submitAnswer(text, noWork = false) {
   const p = B.data.problem;
   const photo = B.photo?.idx === p.idx ? B.photo.file : null;
   if (B.busy || (!String(text).trim() && !photo)) return;
@@ -193,7 +194,15 @@ async function submitAnswer(text) {
       r = await api("/api/battle/answer_photo", { method: "POST", body: fd });
       if (r.result !== "unreadable") B.photo = null;
     } else {
-      r = await api("/api/battle/answer", { json: { task_id: B.data.task.id, idx: p.idx, answer: String(text) } });
+      r = await api("/api/battle/answer", { json: { task_id: B.data.task.id, idx: p.idx, answer: String(text), no_work: noWork } });
+    }
+    if (r.result === "needs_work") {
+      fx.innerHTML = `<div class="helpbox" role="alert">${esc(r.feedback)}
+        <div class="row"><label class="btn primary" for="work-photo">📷 Attach photo</label>
+        <button class="btn" id="no-work">Send without working (half damage)</button></div></div>`;
+      $("#no-work").onclick = () => { B.busy = false; submitAnswer(text, true); };
+      fx.scrollIntoView({ block: "nearest" });
+      return;
     }
     B.lastAnswer = String(text);
     if (r.result === "unreadable") {
@@ -217,7 +226,8 @@ function handleHit(r, p) {
   if (r.result === "miss") {
     FX.play("parry");
     renderBattle();
-    floatDamage("🛡 PARRY", "parry"); $("#monster")?.classList.add("block");
+    floatDamage("🛡 PARRY", "parry"); $("#monster")?.classList.add("strike"); FX.screenShake();
+    $(".battle")?.classList.add("hurt"); setTimeout(() => $(".battle")?.classList.remove("hurt"), 400);
     if (r.misses >= 3) vex("three_misses", $(".battle"));
     $("#fx").innerHTML = `<div class="helpbox" role="alert">${esc(r.feedback)}</div>${disputeBtn()}`;
     bindDispute(p);
@@ -297,7 +307,7 @@ function renderOutcome(r) {
   if (r.outcome === "won") {
     const stars = [1, 2, 3].map((i) => `<span class="star ${i <= r.stars ? "on" : ""}" style="animation-delay:${i * 0.25}s">★</span>`).join("");
     const loot = (r.loot || []).map((l, i) => `<div class="loot ${esc(l.rarity)}" style="animation-delay:${0.9 + i * 0.3}s">
-        ${l.kind === "theme" ? `<span class="swatch" style="background:${esc(l.color)}"></span> Theme: ${esc(l.name)}` : l.kind === "badge" ? `🏅 Badge: ${esc(l.name)}` : `🎖️ Title: ${esc(l.name)}`}
+        ${l.kind === "theme" ? `<span class="swatch" style="background:${esc(l.color)}"></span> Theme: ${esc(l.name)} <button class="btn link small" data-equip-theme="${esc(l.name)}">Use</button>` : l.kind === "badge" ? `🏅 Badge: ${esc(l.name)}` : `🎖️ Title: ${esc(l.name)} <button class="btn link small" data-equip-title="${esc(l.name)}">Wear</button>`}
         <span class="rarity">${esc(l.rarity)}</span></div>`).join("");
     app.innerHTML = `<section class="card center victory">
         <div class="monster dead">${monsterFor(d.enemy)}</div>
@@ -312,6 +322,8 @@ function renderOutcome(r) {
       </section>`;
     FX.play("kill");
     vex("win", $(".victory"));
+    document.querySelectorAll("[data-equip-title]").forEach((b) => (b.onclick = async () => { await api("/api/equip", { json: { title: b.dataset.equipTitle } }); loadToday(); b.outerHTML = "✓ worn"; }));
+    document.querySelectorAll("[data-equip-theme]").forEach((b) => (b.onclick = async () => { const inv = await api("/api/equip", { json: { theme: b.dataset.equipTheme } }); applyTheme(inv.theme_colors[b.dataset.equipTheme]); b.outerHTML = "✓ in use"; }));
   } else {
     app.innerHTML = `<section class="card center">
         <div class="monster">${monsterFor(d.enemy)}💨</div>
@@ -346,6 +358,11 @@ setInterval(() => {
   const left = Math.round(B.data.timer - (Date.now() - B.qStart) / 1000);
   el.textContent = left > 0 ? `⏳ ${fmt(left)}` : "⏳ late: half damage"; el.classList.toggle("late", left <= 0);
 }, 500);
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || S.phase !== "battle" || !B.answered || !$("#next")) return;
+  if (e.target?.tagName === "SUMMARY" || e.target === document.body) { e.preventDefault(); $("#next").click(); }
+});
 
 // paste an image (screenshot / Continuity Camera) straight into the battle
 document.addEventListener("paste", (e) => {

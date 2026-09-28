@@ -56,14 +56,31 @@ def _agrees(q: dict, alt) -> bool:
         return False
 
 
-def matches(q: dict, student: str) -> bool:
-    """Correct if it matches the key, or (for an unverified key) Gemini's alternative."""
+def match_kind(q: dict, student: str) -> str | None:
+    """'key' if it matches the answer key, 'alt' if only Gemini's disputed alternative, else None."""
     if mathcheck.check(q["type"], student, q["answer"], q.get("choices")):
-        return True
+        return "key"
     for alt in q.get("alt_answers", []):
         try:
             if mathcheck.check(q["type"], student, int(alt) if q["type"] == "mcq" else str(alt), q.get("choices")):
-                return True
+                return "alt"
         except (TypeError, ValueError):
             continue
-    return False
+    return None
+
+
+def matches(q: dict, student: str) -> bool:
+    """Correct if it matches the key, or (for an unverified key) Gemini's alternative."""
+    return match_kind(q, student) is not None
+
+
+def trap_feedback(q: dict, student: str) -> str | None:
+    """A known wrong answer ("forgot to normalise") gets its targeted explanation."""
+    for trap in q.get("traps", []):
+        try:
+            if mathcheck.check(q["type"], student, trap["answer"] if q["type"] != "mcq" else int(trap["answer"]),
+                               q.get("choices")):
+                return trap["why"]
+        except (TypeError, ValueError, KeyError):
+            continue
+    return None

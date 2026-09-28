@@ -204,7 +204,19 @@ def api_settings(body: Settings):
 @app.get("/api/review")
 def api_review():
     p, plan = _state()
-    return {"due": review.review_round(p, plan), "total_due": len(review.due_cards(p))}
+    return {"due": review.review_round(p, plan), "total_due": len(review.due_cards(p)),
+            "problems": [review.public_card(c) for c in review.due_problem_cards(p)],
+            "deck_size": len(p.get("problem_cards", {}))}
+
+
+class DeckAnswer(BaseModel):
+    pid: str = Field(max_length=20)
+    answer: str = Field(max_length=500)
+
+
+@app.post("/api/review/problem")
+def api_review_problem(body: DeckAnswer):
+    return review.answer_problem_card(body.pid, body.answer)
 
 
 @app.get("/api/quickwins")
@@ -285,11 +297,12 @@ class BattleAnswer(BaseModel):
     task_id: str
     idx: int = Field(ge=0, le=20)
     answer: str = Field(max_length=500)
+    no_work: bool = False
 
 
 @app.post("/api/battle/answer")
 def api_battle_answer(body: BattleAnswer):
-    return encounter.answer(body.task_id, body.idx, body.answer)
+    return encounter.answer(body.task_id, body.idx, body.answer, no_work=body.no_work)
 
 
 @app.post("/api/battle/answer_photo")
@@ -359,6 +372,14 @@ def api_inventory():
 def api_battle_lesson(body: BattleRef):
     encounter.lesson_opened(body.task_id)
     return {"ok": True}
+
+
+@app.post("/api/prefetch/tomorrow")
+def api_prefetch_tomorrow():
+    p, plan = _state()
+    ids = quest.next_day_task_ids(p, plan)
+    encounter.prefetch(ids)
+    return {"queued": len(ids[:4])}
 
 
 @app.get("/api/run/preview")

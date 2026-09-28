@@ -108,6 +108,8 @@ def env(tmp_path, monkeypatch):
     corpus._INDEX.clear()
     fake = FakeAI()
     monkeypatch.setattr(ai, "runner", fake)
+    from studyquest import encounter
+    monkeypatch.setattr(encounter, "WORK_REQUIRED_COURSES", set())  # opt back in per test
     csv_path = tmp_path / "plan.csv"
     csv_path.write_text(SAMPLE_CSV, encoding="utf-8")
     yield {"data": data, "csv": csv_path, "fake": fake, "tmp": tmp_path}

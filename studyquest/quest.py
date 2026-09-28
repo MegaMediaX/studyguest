@@ -52,18 +52,43 @@ def today_quest(p: dict, plan: dict) -> dict:
 
 
 def rift(p: dict, plan: dict, session: dict | None) -> dict | None:
-    """The next exam for this session's course, told as a world threat: only what's sealed and what's left."""
+    """The next exam for this session's course, counted in the same zones as the World map."""
+    from . import world
     from .corpus import course_for_subject
     if not session:
         return None
     course = course_for_subject(session["subject"])
-    exam = next((e for e in exams_countdown() if e["course"] == course), None)
+    region = next((r for r in world.build(p, plan) if r["course"] == course), None)
+    if not region or not region["exam"]:
+        return None
+    scope = [z for z in region["zones"] if z["exam"] and z["exam"]["name"] == region["exam"]["name"]]
+    nxt = next((z["name"] for z in scope if z["state"] != "sealed" and z["state"] != "locked"), None)
+    return {"name": region["exam"]["name"], "days": region["exam"]["days"],
+            "sealed": sum(1 for z in scope if z["state"] == "sealed"), "total": len(scope), "next": nxt, "unit": "zones"}
+
+
+def exam_scope(p: dict, plan: dict) -> dict | None:
+    """Tasks for the nearest exam only (so Stats shows what matters now, not a wall of 147)."""
+    from .corpus import course_for_subject
+    exam = next(iter(exams_countdown()), None)
     if not exam:
         return None
-    before = [s for s in plan["sessions"] if s["subject"] == session["subject"] and s["date"] and s["date"] < exam["date"]]
-    sealed = sum(1 for s in before if not progress.session_left(p, s))
-    nxt = next((s["session"] for s in before if progress.session_left(p, s)), None)
-    return {"name": exam["name"], "days": exam["days"], "sealed": sealed, "total": len(before), "next": nxt}
+    sessions = [s for s in plan["sessions"] if s["date"] and s["date"] <= exam["date"]
+                and course_for_subject(s["subject"]) == exam["course"]]
+    ids = {s["id"] for s in sessions}
+    tasks = [t for s in sessions for t in s["tasks"]]
+    return {"exam": exam["name"], "days": exam["days"], "session_ids": sorted(ids),
+            "done": sum(1 for t in tasks if progress.is_done(p, t["id"])), "total": len(tasks)}
+
+
+def next_day_task_ids(p: dict, plan: dict) -> list[str]:
+    today = store.today().isoformat()
+    later = [s for s in plan["sessions"] if s["date"] and s["date"] > today]
+    if not later:
+        return []
+    day = later[0]["date"]
+    return [t["id"] for s in later if s["date"] == day for t in s["tasks"]
+            if t["kind"] != "action" and not progress.is_done(p, t["id"])]
 
 
 def next_free_slot(plan: dict, session: dict) -> dict | None:
@@ -112,7 +137,7 @@ def mastery(p: dict, plan: dict) -> list[dict]:
                 vals.append(1.0 if st.get("xp") == progress.XP_FIRST_TRY else 0.7)
             else:
                 vals.append({"review": 0.2, "override": 0.5}.get(status, 0.0))
-        out.append({"subject": s["subject"], "topic": s["session"], "date": s["date"],
+        out.append({"id": s["id"], "subject": s["subject"], "topic": s["session"], "date": s["date"],
                     "score": round(sum(vals) / len(vals), 2) if vals else 0})
     return out
 
@@ -133,6 +158,7 @@ def stats(p: dict, plan: dict) -> dict:
     for _, t in tasks:
         counts[_status(p, t["id"])] += 1
     return {"level": progress.level_for(p["xp"]), "streak": progress.streak_info(p), "counts": counts,
+            "scope": exam_scope(p, plan), "deck": len(p.get("problem_cards", {})),
             "total": len(tasks), "sprints": len(p["sprints"]), "overrides": len(p["overrides"]),
             "mastery": mastery(p, plan), "exams": exams_countdown(), "review_due": len(review.due_cards(p))}
 

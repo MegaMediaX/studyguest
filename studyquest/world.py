@@ -34,6 +34,8 @@ def _task_score(p: dict, tid: str) -> float:
     st = p["tasks"].get(tid, {})
     status = st.get("status", "todo")
     if status == "done":
+        if tid in p.get("unverified_wins", []):
+            return 0.7  # won only via a disputed answer key: doesn't count toward seals
         return 1.0 if p.get("stars", {}).get(tid, 0) >= 2 or st.get("xp") == progress.XP_FIRST_TRY else 0.7
     return {"review": 0.2, "override": 0.5}.get(status, 0.0)
 

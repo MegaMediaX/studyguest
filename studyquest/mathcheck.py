@@ -168,23 +168,38 @@ def _choice_index(student: str, choices: list) -> int | None:
     return None
 
 
+def _single(text: str):
+    """Parse one value/expression; a tuple ("one, one") is not a single answer."""
+    tree = parse(text)
+    if isinstance(tree.body, ast.Tuple):
+        raise NotMath("several values where one was expected")
+    return tree
+
+
 def readable(kind: str, student: str, choices: list | None = None, key=None) -> bool:
-    """Can we even read this answer? Unreadable input must not cost an attempt."""
+    """Can we even read this answer? Unreadable input must not cost an attempt.
+    Words like "idk" or "two" parse as variable names, so free variables are checked against the key."""
     student = str(student or "").strip()
     if not student:
         return False
     try:
         if kind == "mcq":
             return _choice_index(student, choices or []) is not None
-        if kind in {"numeric", "expression"}:
-            parse(student)
-            return True
+        if kind == "numeric":
+            return not free_vars(_single(student))
+        if kind == "expression":
+            allowed = (free_vars(_single(str(key))) if key is not None else VAR_NAMES) | {"c"}
+            return free_vars(_single(student)) <= allowed
         if kind == "multi":
             parts = split_multi(student)
-            for part in parts:
-                parse(part)
-            expected = len(split_multi(str(key))) if key is not None else None
-            return bool(parts) and (expected is None or len(parts) == expected)
+            key_parts = split_multi(str(key)) if key is not None else None
+            if not parts or (key_parts is not None and len(parts) != len(key_parts)):
+                return False
+            for i, part in enumerate(parts):
+                allowed = free_vars(_single(key_parts[i])) if key_parts else VAR_NAMES
+                if not free_vars(_single(part)) <= allowed:
+                    return False
+            return True
     except NotMath:
         return False
     return True

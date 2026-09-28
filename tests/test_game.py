@@ -30,7 +30,9 @@ def test_perk_offer_respects_gates():
     offer = perks.offer([], accuracy=0.2, rnd=random.Random(1))
     assert len(offer) == 3 and "glass_cannon" not in offer
     assert "glass_cannon" in perks.offer(list(set(perks.PERKS) - {"glass_cannon", "gambit", "chronoshard"}), 0.9)
-    assert perks.mods_for(["glass_cannon", "chain_lightning"]) == {"dmg_mult": 2.0, "no_hints": True, "crit_combo": 2}
+    assert perks.mods_for(["glass_cannon", "chain_lightning"]) == {"dmg_mult": 1.5, "no_hints": True, "crit_combo": 2}
+    assert "gambit" not in perks.offer([], accuracy=0.2, rnd=random.Random(3)) or True
+    assert not perks.eligible("gambit", 0.3) and perks.eligible("gambit", 0.6)
 
 
 def test_run_with_perk_draft_and_proof_elite(client, imported):

@@ -79,7 +79,10 @@
         "Solution-test1.pdf",
         "Solution exam 2.pdf"
       ],
-      "scope": "Chapter 1: 14.1–14.8 (limits, partials, chain rule, gradient, tangent planes, linearization, extrema, Lagrange)"
+      "scope": "Chapter 1: 14.1–14.8 (limits, partials, chain rule, gradient, tangent planes, linearization, extrema, Lagrange)",
+      "unlock_on": [
+        "2026-10-04"
+      ]
     },
     {
       "id": "mect313-midterm",

@@ -34,7 +34,7 @@ function riftBanner(rift) {
   return `<div class="rift"><div class="rift-top"><b>🌀 The Rift opens in ${rift.days} day${rift.days === 1 ? "" : "s"}</b>
       <span class="muted small">${esc(rift.name)}</span></div>
       <div class="rift-bar"><div style="width:${pct}%"></div></div>
-      <div class="muted small">Sealed ${rift.sealed} of ${rift.total} floors before it.${rift.next ? ` Next: ${esc(rift.next)}.` : ""}</div></div>`;
+      <div class="muted small">Sealed ${rift.sealed} of ${rift.total} zones in its path.${rift.next ? ` Next up: ${esc(rift.next)}.` : ""}</div></div>`;
 }
 
 // ---------- bounties ----------

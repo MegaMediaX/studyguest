@@ -11,9 +11,9 @@
     "See that? Nobody hands you crits. You earned that one."
   ],
   "three_misses": [
-    "Three misses. Stop and look at the unit vector: did you divide by its length?",
-    "Slow down: write the formula first, then plug in. The formula is on the scroll.",
-    "Check signs before arithmetic. It's almost always a sign.",
+    "Three misses. Stop, read the question again slowly, and write what it asks for in your own words.",
+    "Try the 📐 Rule: say the formula out loud, then plug in one piece at a time.",
+    "Check units and signs before arithmetic. That's where most slips hide.",
     "Take the nudge hint. It costs a little damage and saves the whole fight."
   ],
   "hint_used": [

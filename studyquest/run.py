@@ -147,10 +147,20 @@ def finish(p: dict, abandoned: bool = False) -> dict:
     events = []
     if not abandoned and cleared == len(run["queue"]):
         events = bounties.on_event(p, "run_clear")
+    _prefetch_tomorrow(p)
     p.setdefault("run_history", []).append(summary)
     p["run_history"] = p["run_history"][-50:]
     progress.log(p, "run_end", None, cleared=cleared, abandoned=abandoned)
     return {**public(run), "summary": summary, "events": events, "keys": p.get("economy", {}).get("keys", 0)}
+
+
+def _prefetch_tomorrow(p: dict) -> None:
+    """Session over: build tomorrow's battles in the background, so tomorrow starts with zero wait."""
+    from . import encounter, quest
+    try:
+        encounter.prefetch(quest.next_day_task_ids(p, progress.load_plan()))
+    except Exception:  # noqa: BLE001 - best effort, never blocks finishing a run
+        pass
 
 
 def public(run: dict) -> dict:

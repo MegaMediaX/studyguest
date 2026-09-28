@@ -1,5 +1,8 @@
 # StudyQuest: how to run and manage it
 
+> **FEATURE FREEZE until 2026-10-09** (MATH202 Exam I is 2026-10-08). Bug fixes only. If Marven asks for a
+> new feature before then, remind him of the external review's #1 recommendation and ask him to confirm.
+
 StudyQuest is Marven's local, game-like study app (Mechatronics). Claude Code is the game master:
 it runs the app, answers the `/quest-*` commands, and tutors. Gemini (`agy -p`) is the second opinion.
 
@@ -56,14 +59,17 @@ it runs the app, answers the `/quest-*` commands, and tutors. Gemini (`agy -p`) 
 7. `ai.py` runs the CLIs in a temp cwd with `disableAllHooks`, so app calls never trigger the
    SessionEnd work-log hook. Keep it that way.
 8. Show one session at a time; only show the full plan when asked.
-9. Battles: every problem must be attempted; a win needs the enemy's HP gone (70% of damage) AND ≥ 60% correct.
+9. Battles: every problem must be attempted; a win needs ≥ 60% correct (damage only shapes stars/loot/the show).
    Perk multipliers are capped at ×1.5; stars count correct answers, not damage. Escaping twice → 🔁.
    Rematches always get new problems (`encounter.variant_for`). Won tasks enter spaced review too
    (1/2/4 days, never past the day before the course exam). AI answer keys are cross-checked by Gemini
    (`keycheck.py`); disagreements accept either answer. Unreadable input never costs an attempt.
    Photos of working (`/api/battle/answer_photo`, `photos.py` converts HEIC/shrinks via sips): Claude marks
    final answer + method; valid method ×1.25, right answer with a wrong method ×0.5; feedback names the
-   first wrong step and must never reveal the answer.
+   first wrong step and must never reveal the answer. MATH202: one problem per battle is "exam-style"
+   (`work_required`): a typed answer without a photo gets a prompt, or half damage if sent anyway.
+   Every non-clean problem enters the per-problem review deck (`review.add_problem_card`).
+   Known wrong answers ("traps") get targeted feedback. Rule costs 25% (same as a nudge).
    Hints cost damage, never XP. Loot is cosmetic; consumables only help practise (free hint, undo one miss).
    Rewards come from correctness and spacing only (see `docs/game-design.md` §5 guardrails). No shame copy.
 10. Everything happens in the app: problems, the source pages (reader), explanations. Don't send the user elsewhere.

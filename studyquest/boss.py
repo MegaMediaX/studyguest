@@ -15,6 +15,9 @@ def _cfg(boss_id: str) -> dict:
 
 
 def unlocked(p: dict, plan: dict, b: dict) -> bool:
+    """Open after its gate session, or on a fixed mock date no matter what (timed paper mocks before the exam)."""
+    if any(store.today().isoformat() >= d for d in b.get("unlock_on", [])):
+        return True
     gate = [s for s in plan["sessions"] if s["session"] == b["unlock_after_session"]]
     return bool(gate) and all(not progress.session_left(p, s) for s in gate)
 
@@ -25,6 +28,7 @@ def list_bosses(p: dict, plan: dict) -> list[dict]:
         st = p["bosses"].get(b["id"], {})
         out.append({"id": b["id"], "name": b["name"], "course": b["course"], "minutes": b["minutes"],
                     "unlock_after": b["unlock_after_session"], "unlocked": unlocked(p, plan, b),
+                    "paper": b.get("format") != "mcq", "mock_dates": b.get("unlock_on", []),
                     "beaten": st.get("beaten", False), "best": st.get("best"), "active": st.get("active")})
     return out
 
@@ -45,7 +49,8 @@ def start(p: dict, plan: dict, boss_id: str, force: bool = False) -> dict:
     chunks = _source_chunks(b)
     if not chunks:
         raise ai.AIUnavailable("No readable past-exam pages found for this boss.")
-    reply = ai.ask("claude", prompts.boss(b, chunks))
+    attempt = len(p["bosses"].get(boss_id, {}).get("history", [])) + 1
+    reply = ai.ask("claude", prompts.boss(b, chunks, attempt))
     qs = [q for q in reply.get("questions", []) if isinstance(q, dict) and q.get("q")][: b["questions"]]
     if not qs:
         raise ai.AIUnavailable("Claude returned no boss questions; try again.")

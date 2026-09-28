@@ -160,3 +160,81 @@ def grade_quick_win(index: int, answer: str) -> dict:
         p["quick_wins"].setdefault("results", []).append({"index": index, "ok": ok})
         progress.log(p, "quick_win", None, index=index, ok=ok)
     return {"ok": ok, "reason": r.get("reason", ""), "answer": q["answer"]}
+
+
+# ---------- per-problem deck: the exact problems you missed come back ----------
+
+PROBLEM_ROUND = 8
+
+
+def _pid(prob: dict) -> str:
+    import hashlib
+    return hashlib.sha1(prob["prompt"].encode()).hexdigest()[:10]
+
+
+def add_problem_card(p: dict, enc: dict, prob: dict) -> list[dict]:
+    """Called when a battle problem wasn't clean (missed, second try, hints). Box 0 → back tomorrow."""
+    if prob.get("proof"):
+        return []
+    deck = p.setdefault("problem_cards", {})
+    pid = _pid(prob)
+    plan = progress.load_plan()
+    tid = enc["task_id"] if enc["task_id"] in {t["id"] for _, t in all_tasks(plan)} else None
+    topic = prob.get("from_topic") or (progress.find_task(plan, tid)[0]["session"] if tid else "Mixed")
+    keep = {k: prob.get(k) for k in ("type", "prompt", "answer", "choices", "explain", "hints", "rule", "traps",
+                                     "alt_answers")}
+    deck[pid] = {"id": pid, "task_id": tid, "topic": topic, "problem": keep, "box": 0,
+                 "due": _due(INTERVALS[0], plan, tid) if tid else _due(INTERVALS[0]), "lapses":
+                     deck.get(pid, {}).get("lapses", 0) + 1, "added": store.now_iso()}
+    return [{"type": "problem_card", "due": deck[pid]["due"]}]
+
+
+def due_problem_cards(p: dict) -> list[dict]:
+    today = store.today().isoformat()
+    cards = [c for c in p.get("problem_cards", {}).values() if c["due"] <= today]
+    mixed = interleave([{**c, "task_id": c["id"]} for c in cards], seed=int(store.today().strftime("%Y%m%d")))
+    return mixed[:PROBLEM_ROUND]
+
+
+def public_card(c: dict) -> dict:
+    q = c["problem"]
+    return {"id": c["id"], "topic": c["topic"], "box": c["box"], "type": q["type"], "prompt": q["prompt"],
+            "choices": q.get("choices"), "rule": q.get("rule") or ""}
+
+
+def answer_problem_card(pid: str, text: str) -> dict:
+    """Grade a deck card; right → next box (1/2/4 days, before the exam), wrong → box 0. +1 XP when right."""
+    from . import ai, keycheck, mathcheck, prompts_game
+    card = progress.load().get("problem_cards", {}).get(pid)
+    if not card:
+        raise KeyError("That card isn't in your deck.")
+    q = card["problem"]
+    if q["type"] in keycheck.CHECKABLE:
+        if not mathcheck.readable(q["type"], text, q.get("choices"), q["answer"]):
+            return {"result": "unreadable", "feedback": "Couldn't read that. (No attempt used.)"}
+        correct = keycheck.matches(q, text)
+        why = "" if correct else (keycheck.trap_feedback(q, text) or "")
+    else:
+        r = ai.ask("claude", prompts_game.judge_short(q, text), cache=False)
+        correct, why = float(r.get("score", 0)) >= 0.7, str(r.get("feedback", ""))
+    plan = progress.load_plan()
+    with progress.transaction() as p:
+        c = p.get("problem_cards", {}).get(pid)
+        if not c:
+            raise KeyError("That card isn't in your deck.")
+        events = []
+        if correct:
+            c["box"] += 1
+            events = progress.add_xp(p, 1, "deck recall")
+            if c["box"] >= len(INTERVALS):
+                p["problem_cards"].pop(pid)
+                events.append({"type": "card_graduated"})
+            else:
+                c["due"] = _due(INTERVALS[c["box"]], plan, c["task_id"]) if c["task_id"] else _due(INTERVALS[c["box"]])
+        else:
+            c.update(box=0, due=_due(INTERVALS[0], plan, c["task_id"]) if c["task_id"] else _due(INTERVALS[0]),
+                     lapses=c.get("lapses", 0) + 1)
+        progress.log(p, "deck_answer", c["task_id"] if c else None, correct=correct)
+    answer = f"{'abcdef'[int(q['answer'])]}) {q['choices'][int(q['answer'])]}" if q["type"] == "mcq" else str(q["answer"])
+    return {"result": "right" if correct else "wrong", "feedback": why, "answer": answer, "explain": q.get("explain", ""),
+            "events": events}

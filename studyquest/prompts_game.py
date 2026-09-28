@@ -44,7 +44,9 @@ Write:
    tiny worked "example" with 2-4 steps. Plain text math (∇f, f_x, √, ∫, θ).
 3. "problems": 5 problems, difficulty 1 (easy) to 3 (hard), mixed types. Each has 3 "hints": a nudge, a concrete
    next step, and a full worked solution (the last one). Plus "explain": 1 sentence on why the answer is right,
-   and "rule": the general rule, formula or theorem needed, stated WITHOUT this problem's numbers (1 line).
+   and "rule": the general rule, formula or theorem needed, stated WITHOUT this problem's numbers (1 line),
+   and "traps": 1-2 common WRONG answers students give, each with "why" = the mistake in one sentence
+   (e.g. {{"answer": "-5", "why": "You used v itself instead of the unit vector v/|v|."}}).
    Numbers must be exact and self-consistent; double-check every answer key.
 {TYPE_GUIDE}
 Base the problems on the sources below and cite them with the exact file name and page/slide number.
@@ -54,6 +56,7 @@ Reply with JSON only:
   "example": {{"problem": "...", "steps": ["..."], "answer": "..."}}}},
  "problems": [{{"type": "numeric", "prompt": "...", "answer": "...", "choices": null, "difficulty": 1,
    "hints": ["nudge", "step", "worked solution"], "explain": "...", "rule": "D_u f = ∇f · u, with u a unit vector",
+   "traps": [{{"answer": "...", "why": "..."}}],
    "source": {{"file": "...", "n": 1}}}}]}}
 
 {_sources_block(chunks)}"""

@@ -22,7 +22,7 @@ FIRST_TRY, SECOND_TRY = 1.0, 0.5
 HINT_COST = [0.0, 0.25, 0.5, 1.0]  # fraction of a problem's damage lost at hint level 0..3
 MAX_PERK_MULT = 1.5          # all perk multipliers combined can't exceed this
 CRIT_COMBO, CRIT_MULT = 3, 1.25
-RULE_COST = 0.1           # seeing the rule costs 10% of a problem's damage (a hint's nudge costs 25%)
+RULE_COST = 0.25          # the rule is more telling than a nudge, so it costs at least as much (25%)
 WORK_BONUS, WORK_PENALTY = 1.25, 0.5   # photo of working: valid method bonus / right answer, wrong method
 XP_HIT, XP_HIT_LATE = 2, 1
 XP_CHIMERA = 10
@@ -30,6 +30,7 @@ LOCAL_KINDS = {"mcq", "numeric", "expression", "multi"}
 PREFETCH = threading.Semaphore(2)
 TIMED_SECONDS = 120
 CHIMERA_SIZE = 5
+WORK_REQUIRED_COURSES = {"MATH202"}  # written exams: one problem per battle must be shown on paper
 INTENTS = {"mcq": ("🎯", "Quick strike: multiple choice"), "numeric": ("🔢", "Wants a number"),
            "expression": ("✍️", "Wants an expression"), "multi": ("📍", "Wants a point or vector"),
            "short": ("💬", "Wants it in your own words")}
@@ -53,6 +54,8 @@ def _validate_problem(q: dict) -> dict | None:
     base = {"type": kind, "prompt": str(q["prompt"]).strip(), "hints": hints,
             "explain": str(q.get("explain", "")), "answer": q.get("answer"), "difficulty": difficulty,
             "rule": str(q.get("rule") or "")[:300],
+            "traps": [{"answer": str(t.get("answer")), "why": str(t.get("why", ""))[:200]}
+                      for t in (q.get("traps") or []) if isinstance(t, dict) and t.get("why")][:2],
             "source": q.get("source") if isinstance(q.get("source"), dict) else None}
     try:
         if kind == "mcq":
@@ -102,6 +105,10 @@ def _generate(task: dict, session: dict, variant: str) -> dict:
     if len(problems) < 2:
         raise ai.AIUnavailable("Couldn't build a battle for this task; try again.")
     problems = keycheck.verify(problems)
+    if course in WORK_REQUIRED_COURSES:
+        written = [p for p in problems if p["type"] in {"numeric", "expression", "multi"}]
+        if written:
+            max(written, key=lambda p: p["difficulty"])["work_required"] = True
     valid_refs = {(c["file"], c["n"]): c["unit"] for c in chunks}
     lesson = reply.get("lesson") or {}
     pages = [{"file": c["file"], "n": c["n"], "unit": c["unit"], "course": c["course"]} for c in chunks]
@@ -161,7 +168,8 @@ def _order(problems: list[dict]) -> list[int]:
 def _public_problem(p: dict, idx: int, total: int) -> dict:
     out = {"idx": idx, "number": None, "total": total, "type": p["type"], "prompt": p["prompt"],
            "hints_available": len(p["hints"]), "difficulty": p["difficulty"], "source": p["source"],
-           "unverified": p.get("verified") is False, "from": p.get("from_topic")}
+           "unverified": p.get("verified") is False, "from": p.get("from_topic"),
+           "work_required": bool(p.get("work_required"))}
     if p["type"] == "mcq":
         out["choices"] = p["choices"]
     return out
@@ -338,11 +346,14 @@ def lesson_opened(task_id: str) -> None:
 
 # ---------- answering ----------
 
-def _grade(prob: dict, answer: str) -> tuple[bool, str]:
+def _grade(prob: dict, answer: str) -> tuple[bool, str, bool]:
+    """(correct, feedback, only matched the disputed alternative key)."""
     if prob["type"] in LOCAL_KINDS:
-        return keycheck.matches(prob, answer), ""
+        kind = keycheck.match_kind(prob, answer)
+        feedback = "" if kind else (keycheck.trap_feedback(prob, answer) or "")
+        return kind is not None, feedback, kind == "alt"
     r = ai.ask("claude", prompts_game.judge_short(prob, answer), cache=False)
-    return float(r.get("score", 0)) >= PASS, str(r.get("feedback", ""))
+    return float(r.get("score", 0)) >= PASS, str(r.get("feedback", "")), False
 
 
 FORMAT_HELP = {"mcq": "Pick A–D (or 1–4).", "numeric": "Type a number, e.g. -2, 3/4, sqrt(2)/2 or 3pi/4.",
@@ -350,13 +361,16 @@ FORMAT_HELP = {"mcq": "Pick A–D (or 1–4).", "numeric": "Type a number, e.g. 
                "multi": "Type all the parts, e.g. (1, -2) or (2/3, 1/3, 2/3)."}
 
 
-def answer(task_id: str, idx: int, text: str, photo: str | None = None) -> dict:
+def answer(task_id: str, idx: int, text: str, photo: str | None = None, no_work: bool = False) -> dict:
     enc = _active(progress.load(), task_id)
     if enc["current"] != idx:
         raise KeyError("That problem is already finished. Reload.")
     prob = enc["problems"][idx]
     if photo and prob["type"] == "mcq":
         photo = None  # nothing to show for a choice
+    if prob.get("work_required") and not photo and not no_work:
+        return {"result": "needs_work", "feedback": "Exam-style problem: solve it on paper and attach a photo of your "
+                                                    "working (correct method = +25%). No attempt used."}
     work = None
     if photo:
         work = _grade_work(prob, text, photo)
@@ -369,18 +383,20 @@ def answer(task_id: str, idx: int, text: str, photo: str | None = None) -> dict:
         if not work:
             return {"result": "unreadable", "feedback": f"Couldn't read that. {FORMAT_HELP[prob['type']]} "
                                                         f"(No attempt used.)"}
-        correct, feedback = work["final_correct"], work["feedback"]
+        correct, feedback, via_alt = work["final_correct"], work["feedback"], False
     elif work and prob["type"] == "short":
-        correct, feedback = work["final_correct"], work["feedback"]
+        correct, feedback, via_alt = work["final_correct"], work["feedback"], False
     else:
-        correct, feedback = _grade(prob, text)  # AI (short answers) runs outside the lock
+        correct, feedback, via_alt = _grade(prob, text)  # AI (short answers) runs outside the lock
         if work:
-            feedback = work["feedback"]
+            feedback = work["feedback"] or feedback
+    if prob.get("work_required") and no_work and not work:
+        work = {"method_ok": False, "photo": None, "none": True}
     with progress.transaction() as p:
         enc = _active(p, task_id)
         if enc["current"] != idx:
             raise KeyError("That problem is already finished. Reload.")
-        return _resolve(p, enc, prob, text, correct, feedback, work)
+        return _resolve(p, enc, prob, text, correct, feedback, work, via_alt)
 
 
 def _grade_work(prob: dict, text: str, photo: str) -> dict:
@@ -475,7 +491,10 @@ def _damage(enc: dict, prob: dict, correct: bool, work: dict | None = None) -> t
     if limit and time.time() - enc.get("q_started", time.time()) > limit:
         notes.append("⏳ Too slow: half damage")
         mult *= 0.5
-    if work and mult > 0:
+    if work and work.get("none") and mult > 0:
+        notes.append("📝 No working shown on the exam-style problem: half damage")
+        mult *= WORK_PENALTY
+    elif work and mult > 0:
         if work["method_ok"]:
             notes.append("📝 Method checked: +25% damage for showing correct working")
             mult *= WORK_BONUS
@@ -488,7 +507,7 @@ def _damage(enc: dict, prob: dict, correct: bool, work: dict | None = None) -> t
 
 
 def _resolve(p: dict, enc: dict, prob: dict, text: str, correct: bool, feedback: str,
-             work: dict | None = None) -> dict:
+             work: dict | None = None, via_alt: bool = False) -> dict:
     enc["tries"] += 1
     if not correct:
         enc["misses"] = enc.get("misses", 0) + 1
@@ -501,7 +520,7 @@ def _resolve(p: dict, enc: dict, prob: dict, text: str, correct: bool, feedback:
             note = " 🌬️ Second Wind: this retry is at full damage."
         return {"result": "miss", "feedback": (feedback or "Not quite. Try again or take a hint.") + note,
                 **_view(enc)}
-    if work and work["method_ok"] and correct:
+    if work and work.get("method_ok") and correct:
         p.setdefault("work_log", []).append({"at": store.now_iso(), "task_id": enc["task_id"], "photo": work["photo"]})
     clean = correct and enc["tries"] == 1 and enc["hint_level"] == 0
     enc["combo"] = enc["combo"] + 1 if clean else 0
@@ -510,15 +529,21 @@ def _resolve(p: dict, enc: dict, prob: dict, text: str, correct: bool, feedback:
     enc["best_combo"] = max(enc["best_combo"], enc["combo"])
     enc["results"].append({"idx": enc["current"], "correct": correct, "tries": enc["tries"],
                            "hints": enc["hint_level"], "damage": round(dmg), "answer": text[:300],
-                           "work": {"method_ok": work["method_ok"], "photo": work["photo"]} if work else None})
+                           "work": {"method_ok": work["method_ok"], "photo": work.get("photo")} if work else None,
+                           "via_alt": via_alt})
+    if not clean:
+        events_card = review.add_problem_card(p, enc, prob)  # the exact problem comes back later
+    else:
+        events_card = []
     enc["last_fail"] = None if correct else {
         "idx": enc["current"], "paid_hints": max(0, enc["hint_level"] - enc.get("free_hints", 0))}
     events = []
     if correct and dmg > 0:  # no XP for copying the worked solution
         events = progress.add_xp(p, XP_HIT if mult >= FIRST_TRY else XP_HIT_LATE, "hit", enc["task_id"])
         events += rewards.on_hit(p, clean=clean, crit=crit, topic=_topic(enc))
-        if work and work["method_ok"]:
+        if work and work.get("method_ok"):
             events += bounties.on_event(p, "show_work")
+    events += events_card
     reveal = {"answer": _answer_text(prob), "explain": prob["explain"],
               "solution": "" if clean else (prob["hints"][-1] if prob["hints"] else ""),
               "alt": [str(a) for a in prob.get("alt_answers", [])]}
@@ -638,11 +663,13 @@ def _task(enc: dict) -> dict:
 
 
 def _stars(enc: dict) -> int:
-    """Stars count correct answers, not damage (perks can't buy stars)."""
+    """Stars count correct answers, not damage (perks can't buy stars). An answer that only matched a disputed
+    alternative key can't give ★★★ (the key itself might be wrong)."""
     n = len(enc["problems"])
     clean = sum(1 for r in enc["results"] if r["correct"] and r["tries"] == 1 and r["hints"] == 0)
     correct = _correct_count(enc)
-    return 3 if clean == n else 2 if correct / n >= 0.8 else 1
+    stars = 3 if clean == n else 2 if correct / n >= 0.8 else 1
+    return min(stars, 2) if any(r.get("via_alt") for r in enc["results"]) else stars
 
 
 def star_tip(enc: dict, stars: int) -> str:
@@ -657,7 +684,8 @@ def star_tip(enc: dict, stars: int) -> str:
 
 
 def won(enc: dict) -> bool:
-    return _hp(enc)["now"] == 0 and _correct_count(enc) >= math.ceil(MIN_CORRECT * len(enc["problems"]))
+    """Correct answers decide the win; damage only shapes stars, loot and the show."""
+    return _correct_count(enc) >= math.ceil(MIN_CORRECT * len(enc["problems"]))
 
 
 def _finish(p: dict, enc: dict) -> dict:
@@ -676,6 +704,12 @@ def _finish(p: dict, enc: dict) -> dict:
         else:
             events = progress.record_pass(p, plan, tid, first_try=enc["attempt"] == 1)
             events += review.schedule(p, plan, tid)  # wins get spaced review too
+        if any(r.get("via_alt") for r in enc["results"]):
+            p.setdefault("unverified_wins", [])
+            if tid not in p["unverified_wins"]:
+                p["unverified_wins"].append(tid)
+        elif tid in p.get("unverified_wins", []):
+            p["unverified_wins"].remove(tid)
         best = p.setdefault("stars", {})
         best[tid] = max(best.get(tid, 0), stars)
         p.setdefault("bestiary", {})[tid] = {"enemy": enc["enemy"], "stars": best[tid], "at": store.now_iso()}
@@ -701,9 +735,8 @@ def _finish(p: dict, enc: dict) -> dict:
 
 def _escape_reason(enc: dict) -> str:
     need = math.ceil(MIN_CORRECT * len(enc["problems"]))
-    if _correct_count(enc) < need:
-        return f"You got {_correct_count(enc)} of {len(enc['problems'])} right; {need} are needed to win."
-    return "Not enough damage: hints and second tries hit softer."
+    return (f"You got {_correct_count(enc)} of {len(enc['problems'])} right; {need} are needed to win. "
+            f"The ones you missed are now in your Review deck.")
 
 
 def _finish_chimera(p: dict, enc: dict) -> dict:

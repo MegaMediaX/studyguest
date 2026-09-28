@@ -5,7 +5,6 @@ from . import progress, quest, store
 
 TEMPLATES = {
     "clean_hits": {"text": "Land {n} clean hits on {topic}", "n": 5, "reward": 2, "needs_topic": True},
-    "no_hint_win": {"text": "Win a battle without hints", "n": 1, "reward": 1},
     "rematch_clear": {"text": "Beat a rematch from your review queue", "n": 1, "reward": 2},
     "three_stars": {"text": "Earn ★★★ on any enemy", "n": 1, "reward": 2},
     "proof_win": {"text": "Defeat an enemy that demands proof", "n": 1, "reward": 2},

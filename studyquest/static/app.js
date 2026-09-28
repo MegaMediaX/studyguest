@@ -134,7 +134,7 @@ async function renderQuest() {
   app.innerHTML = `
     ${riftBanner(t.rift)}
     <section class="card" id="task-card">
-      <p class="eyebrow">${t.label === "today" ? "Today's floor" : "Next floor"} · ${esc(s.date_label)} · ${esc(s.time)} · ${esc(s.subject)}</p>
+      <p class="eyebrow">${t.label === "today" ? "Today's session" : "Next session"} · ${esc(s.date_label)} · ${esc(s.time)} · ${esc(s.subject)}</p>
       <h1 class="floor-title">${esc(s.session)}</h1>
       <div class="floor-progress"><div style="width:${Math.round((100 * cleared) / s.total)}%"></div></div>
       <div class="path">${nodes}</div>
@@ -147,7 +147,6 @@ async function renderQuest() {
           <button class="btn" id="skip">Select another task ›</button>${where.replace("btn link", "btn")}${qw.replace("btn link", "btn")}</div>
       </details>
       <div id="help"></div>
-      ${t.backlog.tasks ? `<p class="muted small" style="margin-top:14px">${t.backlog.tasks} earlier encounter(s) still open. They're on the Map.</p>` : ""}
     </section>${bounty}`;
   bindBounties();
   $("#run").onclick = () => (G.run ? (G.run.offer?.length ? renderPerkDraft(G.run) : nextFloor()) : startRun());
@@ -300,7 +299,7 @@ function handleResult(r) {
   // review_later
   S.phase = "card"; S.check = null;
   app.innerHTML = `<section class="card"><h1 class="verdict-warn">🔁 Review later</h1>
-    <p>No XP lost. This comes back tomorrow, then in 3 and 7 days.</p>
+    <p>No XP lost. This comes back tomorrow, then in 2 and 4 days, before your exam.</p>
     <h2>Reference answers</h2><ol>${(r.answers || []).map((a) => `<li>${esc(a)}</li>`).join("")}</ol>
     <div class="row"><button class="btn primary" id="next">Next task</button></div></section>`;
   $("#next").onclick = () => (c.mode === "review" ? renderReview() : renderQuest());
@@ -329,7 +328,7 @@ async function doOverride(task) {
 // ---------- session verdict ----------
 async function renderVerdict(sid) {
   const v = await api(`/api/session/${sid}/verdict`);
-  if (v.complete) beep("level");
+  if (v.complete) { beep("level"); api("/api/prefetch/tomorrow", { method: "POST" }).catch(() => {}); }
   app.innerHTML = `
     <section class="card ${v.complete ? "center burst" : ""}">
       <p class="eyebrow">${esc(v.session)}</p>
@@ -378,13 +377,49 @@ async function renderReview() {
   loading("Loading review…");
   try {
     const r = await api("/api/review");
-    if (!r.due.length) { app.innerHTML = `<section class="card center"><h1>Nothing due 🎉</h1><p class="muted">Missed items come back after 1, 3 and 7 days.</p></section>`; return; }
+    if (r.problems.length) return renderDeck(r);
+    if (!r.due.length) {
+      app.innerHTML = `<section class="card center"><h1>Nothing due 🎉</h1><p class="muted">Missed items come back after 1, 2 and 4 days, always before your exam.${r.deck_size ? ` ${r.deck_size} problem card(s) are waiting for later days.` : ""}</p></section>`;
+      return;
+    }
     const c = r.due[0];
     app.innerHTML = `<section class="card"><p class="eyebrow">Review · ${r.total_due} due · mixed topics</p>
       <p class="muted">${esc(c.topic)}</p><div class="task-text">${esc(c.text)}</div>
       <div class="row"><button class="btn primary big" id="go">⚔️ Rematch</button></div></section>`;
     $("#go").onclick = () => startBattle({ id: c.task_id, text: c.text }, "review");
   } catch (e) { app.innerHTML = ""; showError(e); }
+}
+
+// the exact problems you missed, interleaved, one at a time
+function renderDeck(r) {
+  let i = 0;
+  const step = () => {
+    if (i >= r.problems.length) { toast("Deck round done ✅"); return renderReview(); }
+    const c = r.problems[i];
+    const input = c.type === "mcq"
+      ? `<div class="choices">${c.choices.map((x, k) => `<button class="btn choice" data-k="${k + 1}"><b>${"ABCDEF"[k]}</b> ${esc(x)}</button>`).join("")}</div>`
+      : `<input type="text" id="deck-ans" autocomplete="off" aria-label="Your answer">`;
+    app.innerHTML = `<section class="card"><p class="eyebrow">Missed problems · ${i + 1} of ${r.problems.length} · box ${c.box + 1}/3</p>
+      <p class="muted">${esc(c.topic)}</p><div class="prompt">${esc(c.prompt)}</div>${input}
+      <div class="row">${c.type !== "mcq" ? `<button class="btn primary" id="deck-go">Check ⏎</button>` : ""}
+      ${c.rule ? `<button class="btn" id="deck-rule">📐 Rule</button>` : ""}</div><div id="fx"></div></section>`;
+    const send = async (text) => {
+      if (!String(text).trim()) return;
+      const res = await api("/api/review/problem", { json: { pid: c.id, answer: String(text) } });
+      if (res.result === "unreadable") { $("#fx").innerHTML = `<div class="helpbox">${esc(res.feedback)}</div>`; return; }
+      celebrate(res.events || []);
+      FX.play(res.result === "right" ? "hit" : "miss");
+      $("#fx").innerHTML = `<div class="${res.result === "right" ? "reveal" : "helpbox"}"><b>${res.result === "right" ? "✅ Right" : "↺ Not yet: it comes back tomorrow"}</b>
+        ${res.feedback ? `<p>${esc(res.feedback)}</p>` : ""}<p>Answer: <b>${esc(res.answer)}</b></p>${res.explain ? `<p class="muted">${esc(res.explain)}</p>` : ""}</div>
+        <div class="row"><button class="btn primary" id="deck-next">Next ⏎</button></div>`;
+      $("#deck-next").onclick = () => { i++; step(); }; $("#deck-next").focus();
+    };
+    if ($("#deck-ans")) { $("#deck-ans").focus(); $("#deck-ans").onkeydown = (e) => { if (e.key === "Enter") send(e.target.value); }; }
+    if ($("#deck-go")) $("#deck-go").onclick = () => send($("#deck-ans").value);
+    document.querySelectorAll("[data-k]").forEach((b) => (b.onclick = () => send(b.dataset.k)));
+    if ($("#deck-rule")) $("#deck-rule").onclick = () => { $("#fx").innerHTML = `<div class="helpbox rule"><b>📐 Rule</b><p class="pre">${esc(c.rule)}</p></div>`; };
+  };
+  step();
 }
 
 // ---------- map ----------
@@ -403,6 +438,7 @@ async function renderBoss(id) {
     const end = new Date(b.deadline).getTime();
     app.innerHTML = `<section class="card"><p class="eyebrow">👹 ${esc(b.boss)} · ${b.minutes} min · closed book</p>
       <div class="timer-big" id="boss-timer"></div>
+      <p class="exam-style">📄 Treat this like the real exam: closed book, full working on paper, then type each final answer and attach a photo of your pages at the end.</p>
       <form id="boss-form">${b.questions.map((q, i) => `<label class="q" for="b${i}">${i + 1}. ${esc(q.q)} <span class="muted">(${q.points} pts)</span>${q.source ? `<span class="src">📄 based on ${esc(q.source)}</span>` : ""}</label><textarea id="b${i}" name="answers"></textarea>`).join("")}
       <label class="q">Photo of your working (optional) <input type="file" name="photo" accept="image/*"></label>
       <div class="row"><button class="btn primary big" type="submit">Submit</button></div></form></section>`;
@@ -429,11 +465,14 @@ async function renderStats() {
       <section class="card"><div class="stat-row">
         <div class="stat"><span class="muted">Level</span><b>${s.level.level}</b><span class="muted">${s.level.xp} XP</span></div>
         <div class="stat"><span class="muted">Streak</span><b>🔥 ${s.streak.current}</b><span class="muted">best ${s.streak.best}${s.streak.freeze_available ? " · ❄️ freeze ready" : ""}</span></div>
-        <div class="stat"><span class="muted">Tasks done</span><b>${s.counts.done + s.counts.override}/${s.total}</b><span class="muted">🔁 ${s.counts.review} · overrides ${s.overrides}</span></div>
+        ${s.scope ? `<div class="stat"><span class="muted">${esc(s.scope.exam)}</span><b>${s.scope.done}/${s.scope.total}</b><span class="muted">tasks in scope · ${s.scope.days} days</span></div>` : ""}
+        <div class="stat"><span class="muted">Review deck</span><b>${s.deck}</b><span class="muted">missed problems waiting</span></div>
         <div class="stat"><span class="muted">Sprints</span><b>${s.sprints}</b></div>
       </div></section>
       <section class="card"><h2>Exams</h2>${s.exams.map((e) => `<div class="exam"><span>${esc(e.name)}${e.room ? ` · ${esc(e.time)} ${esc(e.room)}` : ""}</span><b>${e.days === 0 ? "TODAY" : `${e.days} day${e.days === 1 ? "" : "s"}`}</b></div>`).join("")}</section>
-      <section class="card"><h2>Mastery by topic</h2><div class="heat">${s.mastery.map((m) => `<div class="heat-tile"><b>${esc((m.date || "").slice(5))}</b> ${esc(m.topic)}
+      <section class="card"><div class="row spread" style="margin-top:0"><h2 style="margin:0">Mastery${s.scope ? `: ${esc(s.scope.exam)} scope` : ""}</h2>
+        ${s.scope ? `<button class="btn link small" id="show-all">Show everything</button>` : ""}</div>
+        <div class="heat">${s.mastery.filter((m) => !s.scope || S.showAll || s.scope.session_ids.includes(m.id)).map((m) => `<div class="heat-tile"><b>${esc((m.date || "").slice(5))}</b> ${esc(m.topic)}
         <span class="heat-pct">${Math.round(m.score * 100)}%</span><span class="heat-bar"><span style="width:${Math.round(m.score * 100)}%"></span></span></div>`).join("")}</div></section>
       <section class="card" id="inventory"><h2>Inventory</h2><p class="muted">Loading…</p></section>
       <section class="card"><h2>Settings & data</h2>
@@ -445,6 +484,7 @@ async function renderStats() {
         <div class="row"><a class="btn primary" href="/api/export">Export CSV for Google Sheets</a>
         <label class="btn">Import checklist<input type="file" id="import-file" accept=".csv,.md,.txt" hidden></label></div>
       </section>`;
+    if ($("#show-all")) $("#show-all").onclick = () => { S.showAll = !S.showAll; renderStats(); };
     $("#save-set").onclick = async () => {
       try { S.settings = await api("/api/settings", { json: { sprint_min: +$("#set-sprint").value, break_min: +$("#set-break").value, sound: S.settings.sound, focus_fullscreen: $("#set-fs").checked, fx: $("#set-fx").value } }); toast("Saved"); }
       catch (e) { showError(e); }
@@ -472,6 +512,11 @@ function renderInventory(inv) {
     applyTheme(inv2.theme_colors[b.dataset.theme]); renderInventory(inv2);
   }));
 }
+
+// sticky elements sit under the real header height (it wraps on phones)
+function syncHeaderHeight() { document.documentElement.style.setProperty("--hdr", `${Math.ceil(document.querySelector("header").getBoundingClientRect().bottom)}px`); }
+window.addEventListener("resize", syncHeaderHeight);
+setTimeout(syncHeaderHeight, 0);
 
 function applyTheme(color) { if (color) document.documentElement.style.setProperty("--accent", color); }
 
