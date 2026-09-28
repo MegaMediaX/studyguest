@@ -21,13 +21,14 @@ async function renderWorld() {
     app.innerHTML = `
       <div class="region-tabs">${regions.map((r) => `<button class="btn ${r.course === W.region ? "primary" : ""}" data-region="${esc(r.course)}">${r.icon} ${esc(r.region)} <span class="small">${r.sealed}/${r.zones.length} ✦</span></button>`).join("")}</div>
       ${regionRift(region)}
-      <section class="card map-card"><svg class="worldmap" viewBox="0 0 820 400" role="img" aria-label="${esc(region.region)} map">${mapSvg(region, here)}</svg></section>
+      ${innerWidth < 560 ? zoneList(region, here) : `<section class="card map-card"><svg class="worldmap" viewBox="0 0 820 400" role="img" aria-label="${esc(region.region)} map">${mapSvg(region, here)}</svg></section>`}
       <div id="zone-panel"></div>
       ${W.data.bosses.map((b) => `<section class="card"><h2>👹 ${esc(b.name)} ${b.beaten ? "· beaten ✅" : ""}</h2>
         <p class="muted">${b.minutes}-min timed mock from past exams. ${b.unlocked ? "Unlocked." : `Unlocks after “${esc(b.unlock_after)}”.`}${b.best != null ? ` Best: ${Math.round(b.best * 100)}%` : ""}</p>
         <button class="btn ${b.unlocked ? "primary" : ""}" data-boss="${esc(b.id)}" ${b.unlocked ? "" : "disabled"}>Fight</button></section>`).join("")}
       <button class="btn link" id="full">Show full plan</button><div id="fullplan"></div>`;
     document.querySelectorAll("[data-region]").forEach((b) => (b.onclick = () => { W.region = b.dataset.region; W.zone = null; renderWorld(); }));
+    document.querySelectorAll(".zone-item").forEach((b) => (b.onclick = () => { selectZone(b.dataset.zone); $("#zone-panel").scrollIntoView({ block: "start" }); }));
     document.querySelectorAll(".zone-node").forEach((g) => {
       g.onclick = () => selectZone(g.dataset.zone);
       g.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectZone(g.dataset.zone); } };
@@ -36,6 +37,17 @@ async function renderWorld() {
     $("#full").onclick = showFullPlan;
     selectZone(W.zone);
   } catch (e) { app.innerHTML = ""; showError(e); }
+}
+
+// phones: a vertical path is readable where an 820-wide map would shrink labels to ~6px
+function zoneList(region, here) {
+  return `<section class="card zone-list">${region.zones.map((z, i) => `
+    <button class="zone-item ${z.state} ${W.zone === z.id ? "selected" : ""}" data-zone="${esc(z.id)}">
+      <span class="zi-icon">${z.state === "locked" ? "🔒" : z.state === "sealed" ? "✦" : esc(z.icon)}</span>
+      <span class="zi-main"><b>${esc(z.name)}</b>${here && here.id === z.id ? " 🚩" : ""}
+        <span class="zi-sub">${esc(z.tier)} · ${Math.round(z.mastery * 100)}%${z.rematches ? ` · ${z.rematches} rematch due` : ""}${z.corruption > 0 && z.state !== "sealed" ? ` · 🌀 ${Math.round(z.corruption * 100)}%` : ""}</span>
+        <span class="mini-bar"><span style="width:${Math.round(z.mastery * 100)}%"></span></span></span>
+    </button>${i < region.zones.length - 1 ? '<span class="zi-edge" aria-hidden="true"></span>' : ""}`).join("")}</section>`;
 }
 
 function regionRift(r) {
@@ -96,7 +108,7 @@ function zoneNode(z, isHere) {
 
 function selectZone(id) {
   W.zone = id;
-  document.querySelectorAll(".zone-node").forEach((g) => g.classList.toggle("selected", g.dataset.zone === id));
+  document.querySelectorAll(".zone-node, .zone-item").forEach((g) => g.classList.toggle("selected", g.dataset.zone === id));
   const region = W.data.regions.find((r) => r.course === W.region);
   const z = region.zones.find((x) => x.id === id);
   if (!z) return;

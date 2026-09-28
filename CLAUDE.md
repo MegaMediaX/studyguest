@@ -18,6 +18,7 @@ it runs the app, answers the `/quest-*` commands, and tutors. Gemini (`agy -p`) 
 | `studyquest/mathcheck.py` | local answer checking (numbers, expressions by random-point evaluation, points, MCQ); strict AST whitelist |
 | `studyquest/run.py`, `perks.py`, `bounties.py` | runs (≤ 4 floors, perk draft), chests (published odds, pity, no dupes), daily bounties, shards/keys |
 | `studyquest/world.py` | world map: courses = regions, topic clusters = zones (`config.json` "world"), tiers, seals, Rift corruption, zone runs |
+| `studyquest/rewards.py`, `keycheck.py` | loot (published odds), ghosts, bounty hooks; Gemini cross-check of answer keys |
 | `studyquest/sources.py` | serves course pages as images/text inside the app (looked up via the corpus only) |
 | `studyquest/checker.py` | text done-check used by the terminal `/quest-check` and for 📌 action tasks |
 | `studyquest/review.py` | Leitner spaced review (1/3/7 days), interleaving, daily 3 quick wins |
@@ -55,7 +56,11 @@ it runs the app, answers the `/quest-*` commands, and tutors. Gemini (`agy -p`) 
 7. `ai.py` runs the CLIs in a temp cwd with `disableAllHooks`, so app calls never trigger the
    SessionEnd work-log hook. Keep it that way.
 8. Show one session at a time; only show the full plan when asked.
-9. Battles: defeating the enemy (≥ 70% of available damage) = passing the check. Escaping twice → 🔁.
+9. Battles: every problem must be attempted; a win needs the enemy's HP gone (70% of damage) AND ≥ 60% correct.
+   Perk multipliers are capped at ×1.5; stars count correct answers, not damage. Escaping twice → 🔁.
+   Rematches always get new problems (`encounter.variant_for`). Won tasks enter spaced review too
+   (1/2/4 days, never past the day before the course exam). AI answer keys are cross-checked by Gemini
+   (`keycheck.py`); disagreements accept either answer. Unreadable input never costs an attempt.
    Hints cost damage, never XP. Loot is cosmetic; consumables only help practise (free hint, undo one miss).
    Rewards come from correctness and spacing only (see `docs/game-design.md` §5 guardrails). No shame copy.
 10. Everything happens in the app: problems, the source pages (reader), explanations. Don't send the user elsewhere.

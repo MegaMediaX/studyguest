@@ -17,6 +17,8 @@ const FORMAT_HINT = {
 };
 
 async function startBattle(task, mode = "task", runId = null) {
+  enterFocus(); // must run inside the click's user gesture, before any await
+  notePlay();
   S.phase = "battle";
   G.saidThisBattle = 0;
   loading(task.text ? `Summoning the enemy for “${task.text}”…` : "Descending to the next floor…");
@@ -25,11 +27,16 @@ async function startBattle(task, mode = "task", runId = null) {
     const [r, econ] = await Promise.all([api("/api/battle/start", { json: { task_id: task.id, mode, run_id: runId } }),
       api("/api/chest").catch(() => ({ economy: {} }))]);
     B.econ = econ.economy || {};
-    if (r.state === "already_done") { toast("Already defeated ✅"); S.phase = "card"; return renderQuest(); }
+    if (r.state === "already_done") {
+      S.phase = "card";
+      if (r.run?.state === "done") return renderRunSummary(r.run);
+      if (r.run) { G.run = r.run; toast("Already cleared ✅ skipping to the next floor"); return nextFloor(); }
+      toast("Already defeated ✅"); return renderQuest();
+    }
     if (r.state === "action") { S.phase = "card"; return startCheck(task); }
     B.data = r; B.phase = (r.problem && r.problem.number > 1) || r.rules?.gambit ? "problem" : "lesson";
     B.qStart = Date.now() - (r.elapsed || 0) * 1000;
-    enterFocus();
+    if (B.phase === "lesson") markLesson();
     renderBattle();
   } catch (e) { S.phase = "card"; app.innerHTML = `<section class="card"></section>`; showError(e, $(".card")); addBack($(".card")); }
 }
@@ -54,17 +61,19 @@ function enemyPanel(d, showIntent = true) {
   return `<div class="enemy">
       <div class="monster-wrap">${intent}<div class="monster" id="monster" aria-hidden="true">${monsterFor(d.enemy)}</div></div>
       <div class="enemy-info"><div class="enemy-name">${esc(d.enemy)} ${affix}</div>${hpBar(d.hp, d.ghost)}
-        <div class="muted small">${esc(d.task.text)} ${d.attempt > 1 ? "· rematch" : ""} ${combo}</div></div>
+        <div class="muted small">${esc(d.task.text)} ${d.attempt > 1 ? "· rematch" : ""} ${combo}</div>
+        ${d.staggered ? `<div class="stagger">💫 Staggered! Finish the last problems: ${d.correct}/${d.need_correct} correct needed so far.</div>` : ""}</div>
       <button class="btn link" id="exit-battle" title="Leave (progress is kept)">✕</button>
     </div>`;
 }
 
 function renderBattle(extra = "") {
   const d = B.data;
+  B.answered = false;
   const body = B.phase === "lesson" ? lessonHtml(d) : problemHtml(d.problem);
   app.innerHTML = `<section class="card battle">${d.run_id && G.run ? runBar(G.run) : ""}${enemyPanel(d)}${d.notice ? `<div class="notice">${esc(d.notice)}</div>` : ""}${extra}${body}</section>`;
   $("#exit-battle").onclick = () => { exitFocus(); S.phase = "card"; go("quest"); };
-  if (B.phase === "lesson") bindLesson(d); else bindProblem(d.problem);
+  if (B.phase === "lesson") bindLesson(d); else { bindProblem(d.problem); $(".battle").scrollIntoView({ block: "start" }); }
   if (d.ghost && d.problem?.number === 1 && B.phase === "problem") toast(`👻 Your ghost from ${d.ghost.at.slice(5, 10)} is here. Beat it.`);
 }
 
@@ -82,6 +91,9 @@ function lessonHtml(d) {
     </div>
     <div class="row"><button class="btn primary big" id="fight">⚔️ Fight!</button></div>`;
 }
+function markLesson() {
+  if (B.data?.task?.id) api("/api/battle/lesson", { json: { task_id: B.data.task.id } }).catch(() => {});
+}
 function bindLesson(d) {
   $("#fight").onclick = () => { B.phase = "problem"; B.qStart = Date.now(); enterFocus(); renderBattle(); };
   if ($("#read-src")) $("#read-src").onclick = () => openReader(d.pages, 0);
@@ -94,23 +106,28 @@ function problemHtml(p) {
     ? `<div class="choices">${p.choices.map((c, i) => `<button class="btn choice" data-i="${i}"><b>${"ABCDEF"[i]}</b> ${esc(c)}</button>`).join("")}</div>`
     : p.type === "short"
       ? `<textarea id="ans" placeholder="${esc(FORMAT_HINT.short)}"></textarea>`
-      : `<input type="text" id="ans" autocomplete="off" spellcheck="false" placeholder="${esc(FORMAT_HINT[p.type])}">`;
-  const src = p.source ? `<button class="btn link small" id="src-link">📄 ${esc(p.source.file)} · ${esc(p.source.unit)} ${p.source.n}</button>` : "";
+      : `<input type="text" id="ans" autocomplete="off" spellcheck="false" aria-label="Your answer" aria-describedby="fmt">
+         <p class="fmt" id="fmt">${esc(FORMAT_HINT[p.type])}</p>`;
+  const src = p.source ? `<button class="btn" id="src-link">📄 ${esc(p.source.file)} · ${esc(p.source.unit)} ${p.source.n}</button>` : "";
   return `<div class="problem">
       <p class="eyebrow">Problem ${p.number} of ${p.total} · ${"★".repeat(p.difficulty)}${"☆".repeat(3 - p.difficulty)} ${B.data.tries ? "· 2nd try (half damage)" : ""}
         ${B.data.timer ? `· <span id="qtimer" class="qtimer"></span>` : ""}</p>
       <div class="prompt">${esc(p.prompt)}</div>
-      ${src} <button class="btn link small" id="scroll-link">📜 Lesson</button>
+      ${p.unverified ? `<p class="muted small">⚠ Two graders disagreed on this key, so either answer counts.</p>` : ""}
       <div id="hints"></div>
       ${input}
       <div class="row spread">
         <span>${p.type !== "mcq" ? `<button class="btn primary big" id="attack">Attack ⏎</button>` : ""}</span>
-        <span>${B.econ?.consumables?.retry_token && B.data.tries === 1 ? `<button class="btn" id="tok-retry">↺ Retry token</button>` : ""}
-        ${B.econ?.consumables?.hint_token && !B.data.rules?.no_hints ? `<button class="btn" id="tok-hint">💡 Hint token</button>` : ""}
-        ${B.data.rules?.no_hints ? `<span class="muted small">💎 Glass Cannon: no hints</span>` : `<button class="btn" id="hint-btn">💡 Hint <span class="muted small">(${p.hints_available - B.data.hint_level} left${B.data.rules?.free_hints ? ", next free" : ""})</span></button>`}
-        <button class="btn link" id="explain-btn">Explain differently</button></span>
+        <span>${B.data.rules?.no_hints ? `<span class="muted small">💎 Glass Cannon: no hints</span>` : `<button class="btn" id="hint-btn">💡 Hint <span class="muted small">(${p.hints_available - B.data.hint_level} left${B.data.rules?.free_hints ? ", next free" : ""})</span></button>`}</span>
       </div>
       <div id="fx"></div>
+      <details class="more"><summary>More help</summary><div class="row">
+        <button class="btn" id="explain-btn">Explain differently</button>
+        <button class="btn" id="scroll-link">📜 Lesson</button>
+        ${src}
+        ${B.econ?.consumables?.retry_token && B.data.tries === 1 ? `<button class="btn" id="tok-retry">↺ Retry token</button>` : ""}
+        ${B.econ?.consumables?.hint_token && !B.data.rules?.no_hints ? `<button class="btn" id="tok-hint">💡 Hint token</button>` : ""}
+      </div></details>
     </div>`;
 }
 function bindProblem(p) {
@@ -120,7 +137,7 @@ function bindProblem(p) {
   if ($("#attack")) $("#attack").onclick = () => submitAnswer(ans.value);
   document.querySelectorAll(".choice").forEach((b) => (b.onclick = () => submitAnswer(b.dataset.i === undefined ? "" : String(+b.dataset.i + 1))));
   if ($("#hint-btn")) $("#hint-btn").onclick = () => takeHint(p);
-  $("#scroll-link").onclick = () => { B.phase = "lesson"; renderBattle(); $("#fight").textContent = "⚔️ Back to the fight"; };
+  $("#scroll-link").onclick = () => { B.phase = "lesson"; markLesson(); renderBattle(); $("#fight").textContent = "⚔️ Back to the fight"; };
   for (const [id, kind] of [["#tok-retry", "retry_token"], ["#tok-hint", "hint_token"]]) {
     if ($(id)) $(id).onclick = async () => {
       try { const v = await api("/api/battle/token", { json: { task_id: B.data.task.id, kind } }); B.econ.consumables[kind]--; B.data = { ...B.data, ...v }; renderBattle(); toast(kind === "retry_token" ? "↺ Miss undone" : "💡 Next hint is free"); }
@@ -134,7 +151,8 @@ function bindProblem(p) {
   };
 }
 document.addEventListener("keydown", (e) => {
-  if (S.phase !== "battle" || B.phase !== "problem" || !B.data?.problem || B.data.problem.type !== "mcq") return;
+  if (S.phase !== "battle" || B.phase !== "problem" || B.answered || B.busy || !B.data?.problem || B.data.problem.type !== "mcq") return;
+  if (!document.querySelector(".choices") || $("#welcome") || $("#campfire") || $("#longsession")) return;
   if ($("#reader") || document.activeElement?.tagName === "TEXTAREA") return;
   const k = e.key.toLowerCase(); const i = "1234".indexOf(k) >= 0 ? "1234".indexOf(k) : "abcd".indexOf(k);
   if (i >= 0 && i < B.data.problem.choices.length) submitAnswer(String(i + 1));
@@ -148,6 +166,11 @@ async function submitAnswer(text) {
   try {
     const r = await api("/api/battle/answer", { json: { task_id: B.data.task.id, idx: p.idx, answer: String(text) } });
     B.lastAnswer = String(text);
+    if (r.result === "unreadable") {
+      fx.innerHTML = `<div class="helpbox" role="alert">${esc(r.feedback)}</div>`;
+      fx.scrollIntoView({ block: "nearest" }); $("#ans")?.focus();
+      return;
+    }
     handleHit(r, p);
   } catch (e) { showError(e, $(".battle")); } finally { B.busy = false; }
 }
@@ -166,15 +189,17 @@ function handleHit(r, p) {
     renderBattle();
     floatDamage("🛡 PARRY", "parry"); $("#monster")?.classList.add("block");
     if (r.misses >= 3) vex("three_misses", $(".battle"));
-    $("#fx").innerHTML = `<div class="helpbox">${esc(r.feedback)}</div>${disputeBtn()}`;
+    $("#fx").innerHTML = `<div class="helpbox" role="alert">${esc(r.feedback)}</div>${disputeBtn()}`;
     bindDispute(p);
+    $("#fx").scrollIntoView({ block: "nearest" });
     return;
   }
+  B.answered = true;
   celebrate(r.events || [], true);
   if (r.result === "hit") FX.play(r.crit ? "crit" : "hit", prev.combo); else FX.play("miss");
   if (r.crit) { FX.flash(); FX.screenShake(); }
   const reveal = r.reveal ? `<div class="reveal"><p class="eyebrow">${r.result === "hit" ? "Why it's right" : "The answer"}</p>
-      <p><b>${esc(r.reveal.answer)}</b></p>${r.reveal.explain ? `<p>${esc(r.reveal.explain)}</p>` : ""}
+      <p><b>${esc(r.reveal.answer)}</b>${r.reveal.alt?.length ? ` <span class="muted small">(also accepted: ${r.reveal.alt.map(esc).join(", ")})</span>` : ""}</p>${r.reveal.explain ? `<p>${esc(r.reveal.explain)}</p>` : ""}
       ${r.reveal.solution ? `<details><summary>Worked solution</summary><p class="pre">${esc(r.reveal.solution)}</p></details>` : ""}
       ${r.result === "fail" ? disputeBtn() : ""}</div>` : "";
   const next = r.outcome ? `<button class="btn primary big" id="next">${r.outcome === "won" ? "🏆 Claim victory" : "Continue"}</button>`
@@ -231,15 +256,17 @@ function renderOutcome(r) {
   const d = B.data;
   if (r.outcome === "won") {
     const stars = [1, 2, 3].map((i) => `<span class="star ${i <= r.stars ? "on" : ""}" style="animation-delay:${i * 0.25}s">★</span>`).join("");
-    const loot = (r.loot || []).map((l, i) => `<div class="loot ${l.rarity}" style="animation-delay:${0.9 + i * 0.3}s">
+    const loot = (r.loot || []).map((l, i) => `<div class="loot ${esc(l.rarity)}" style="animation-delay:${0.9 + i * 0.3}s">
         ${l.kind === "theme" ? `<span class="swatch" style="background:${esc(l.color)}"></span> Theme: ${esc(l.name)}` : l.kind === "badge" ? `🏅 Badge: ${esc(l.name)}` : `🎖️ Title: ${esc(l.name)}`}
         <span class="rarity">${esc(l.rarity)}</span></div>`).join("");
     app.innerHTML = `<section class="card center victory">
         <div class="monster dead">${monsterFor(d.enemy)}</div>
         <h1 class="verdict-ok">${esc(d.enemy)} defeated!</h1>
         <div class="stars">${stars}</div>
-        <p class="muted">Best combo x${r.best_combo}${r.focus_breaks === 0 ? " · 🎯 zero tab switches" : ""}</p>
+        <p class="muted">${esc(r.star_tip || "")}</p>
+        <p class="muted small">Best combo x${r.best_combo}${r.focus_breaks === 0 ? " · 🎯 zero tab switches" : ""}</p>
         ${loot ? `<p class="eyebrow">Loot</p><div class="loots">${loot}</div>` : ""}
+        ${r.loot_odds ? `<p class="muted small">Loot odds per roll (1 roll per ★, +1 for no tab switches): theme ${Math.round(r.loot_odds.theme * 100)}%, title ${Math.round(r.loot_odds.title * 100)}%. Cosmetic only.</p>` : ""}
         ${r.ghost_result ? `<p>${r.ghost_result.surpassed ? `👻 You beat your ghost from ${esc(r.ghost_result.date.slice(5))}! +1 ◆` : `👻 Your ghost (${esc(r.ghost_result.date.slice(5))}) did better. Next time.`}</p>` : ""}
         <div class="row" style="justify-content:center"><button class="btn primary big" id="next">${nextLabel(r)}</button></div>
       </section>`;
@@ -249,7 +276,8 @@ function renderOutcome(r) {
     app.innerHTML = `<section class="card center">
         <div class="monster">${monsterFor(d.enemy)}💨</div>
         <h1 class="verdict-warn">${esc(d.enemy)} escaped</h1>
-        <p>No XP lost. ${r.rematch ? "Rematch any time; the next fight has fresh problems." : "It's in your review queue: it comes back tomorrow, then in 3 and 7 days."}</p>
+        ${r.why ? `<p><b>${esc(r.why)}</b></p>` : ""}
+        <p>No XP lost. ${r.rematch ? "Rematch any time; the next fight has new problems." : "It's in your review queue: it comes back tomorrow, then in 2 and 4 days (before your exam)."}</p>
         <div class="row" style="justify-content:center"><button class="btn primary big" id="next">${nextLabel(r)}</button></div>
       </section>`;
     FX.play("lose");
@@ -257,12 +285,13 @@ function renderOutcome(r) {
   }
   $("#next").onclick = () => {
     S.taskIndex = null; B.critSaid = false; B.prevPct = null;
-    if (r.run?.state === "done") return renderRunSummary(r.run);
-    if (r.run?.offer?.length) return renderPerkDraft(r.run);
-    go(S.view === "review" ? "review" : "quest");
+    if (r.run?.state === "done") renderRunSummary(r.run);
+    else if (r.run?.offer?.length) renderPerkDraft(r.run);
+    else go(S.view === "review" ? "review" : "quest");
+    maybeCampfire(); // only after you've seen your reward
+    maybeLongSession();
   };
   $("#next").focus();
-  maybeCampfire();
 }
 
 function nextLabel(r) {
@@ -287,7 +316,7 @@ function openReader(pages, i) {
     try {
       const q = `course=${encodeURIComponent(pg.course)}&file=${encodeURIComponent(pg.file)}&n=${pg.n}`;
       const meta = await api(`/api/source?${q}`);
-      box.innerHTML = meta.image ? `<img src="/api/source/img?${q}" alt="${esc(meta.file)} ${esc(meta.unit)} ${meta.n}">`
+      box.innerHTML = meta.image ? `<img src="/api/source/img?${q}" alt="${esc(meta.file)} ${esc(meta.unit)} ${meta.n}" onload="B.applyZoom && B.applyZoom()">`
         : `<pre class="pre">${esc(meta.text || "(no text on this page)")}</pre>`;
       $("#reader .reader-title").textContent = `${meta.file} · ${meta.unit} ${meta.n} (${k + 1}/${pages.length})`;
     } catch (e) { box.innerHTML = `<p class="notice">${esc(e.message)}</p>`; }
@@ -297,9 +326,16 @@ function openReader(pages, i) {
   close();
   document.body.insertAdjacentHTML("beforeend", `<div id="reader" role="dialog" aria-label="Course page">
       <div class="reader-bar"><span class="reader-title"></span>
-        <span><button class="btn prev">‹</button> <button class="btn next">›</button> <button class="btn primary close">Back to battle</button></span></div>
+        <span><button class="btn zoom-out" aria-label="Zoom out">−</button> <button class="btn zoom-in" aria-label="Zoom in">+</button>
+        <button class="btn prev" aria-label="Previous page">‹</button> <button class="btn next" aria-label="Next page">›</button> <button class="btn primary close">Back to battle</button></span></div>
       <div class="reader-body"></div></div>`);
   $("#reader .close").onclick = close;
+  B.zoom = B.zoom || (innerWidth < 560 ? 2 : 1);
+  const applyZoom = () => { const img = $("#reader .reader-body img"); if (img) img.style.width = `${Math.round(B.zoom * Math.min(900, innerWidth - 36))}px`; };
+  $("#reader .zoom-in").onclick = () => { B.zoom = Math.min(4, B.zoom + 0.5); applyZoom(); };
+  $("#reader .zoom-out").onclick = () => { B.zoom = Math.max(0.75, B.zoom - 0.5); applyZoom(); };
+  B.applyZoom = applyZoom;
+  $("#reader .close").focus();
   $("#reader .prev").onclick = () => show(+$("#reader").dataset.k - 1);
   $("#reader .next").onclick = () => show(+$("#reader").dataset.k + 1);
   show(i);
@@ -326,12 +362,14 @@ document.addEventListener("visibilitychange", () => {
   G.saidThisBattle = 0;
   api("/api/battle/focus", { json: { task_id: B.data.task.id } }).catch(() => {});
   const p = B.data.problem;
-  document.body.insertAdjacentHTML("beforeend", `<div id="welcome" class="overlay"><div class="card center">
+  if ($("#welcome")) return;
+  document.body.insertAdjacentHTML("beforeend", `<div id="welcome" class="overlay" role="dialog" aria-modal="true" aria-label="Welcome back"><div class="card center">
       <h1>Welcome back 👋</h1><p class="muted">You were away ${away >= 60 ? Math.round(away / 60) + " min" : away + " s"}.</p>
       <p>You're fighting <b>${esc(B.data.enemy)}</b>${p ? ` · problem ${p.number} of ${p.total}:` : "."}</p>
       ${p ? `<p class="prompt small">${esc(p.prompt.slice(0, 160))}${p.prompt.length > 160 ? "…" : ""}</p>` : ""}
       <button class="btn primary big" id="resume">Back in ⚔️</button></div></div>`);
   $("#resume").onclick = () => { $("#welcome").remove(); $("#ans")?.focus(); };
+  $("#resume").focus();
 });
 
 // ---------- campfire (optional break) ----------
@@ -340,11 +378,12 @@ function maybeCampfire() {
   if (!LS.get("lastBreak", null)) LS.set("lastBreak", Date.now());
   if (Date.now() - since < S.settings.sprint_min * 60000) return;
   setTimeout(() => {
-    if (S.phase === "battle") return;
-    document.body.insertAdjacentHTML("beforeend", `<div id="campfire" class="overlay"><div class="card center">
+    if (S.phase === "battle" || $("#campfire")) return;
+    document.body.insertAdjacentHTML("beforeend", `<div id="campfire" class="overlay" role="dialog" aria-modal="true" aria-label="Break"><div class="card center">
         <div class="monster">🔥</div><h1>Campfire?</h1>
         <p class="muted">You've been fighting for ${Math.round((Date.now() - since) / 60000)} min. A ${S.settings.break_min}-min rest keeps you sharp.</p>
         <div class="row" style="justify-content:center"><button class="btn primary" id="rest">Rest ${S.settings.break_min} min</button><button class="btn" id="nah">Keep fighting</button></div></div></div>`);
+    $("#rest").focus();
     $("#rest").onclick = () => { $("#campfire").remove(); LS.set("lastBreak", Date.now()); LS.set("break", { end: Date.now() + S.settings.break_min * 60000, minutes: S.settings.break_min }); renderBreak(); };
     $("#nah").onclick = () => { $("#campfire").remove(); LS.set("lastBreak", Date.now() - S.settings.sprint_min * 30000); };
   }, 1500);

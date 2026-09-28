@@ -11,7 +11,16 @@ TYPE_GUIDE = """Problem types (prefer the machine-checkable ones; the app grades
 - "short": one-line explanation; graded by a tutor. Use at most once."""
 
 
-def encounter(task: dict, session: dict, chunks: list[dict]) -> str:
+COURSE_FORMAT = {
+    "MATH202": ("The real exam is written and you must show working. Use at most 1 mcq; prefer numeric, "
+                "expression and multi problems whose final answer needs real working (not recognition)."),
+    "MECT313": ("The real midterm is multiple choice, closed book. Make at least 3 of the 5 problems mcq with "
+                "plausible distractors built from common mistakes (wrong ratio, forgot √3, mixed up primary/"
+                "secondary, per-unit base errors), plus quick numeric problems."),
+}
+
+
+def encounter(task: dict, session: dict, chunks: list[dict], variant: str = "", course: str | None = None) -> str:
     if task["kind"] == "exercise":
         focus = ("This is an exercise task. Turn the assigned exercises into the problems: copy the actual problem "
                  "statements from the sources when they are there (numbers included) and ask for the final result. "
@@ -26,6 +35,8 @@ def encounter(task: dict, session: dict, chunks: list[dict]) -> str:
 Task: {task['text']}
 Session: {session['session']} ({session['subject']})
 {focus}
+{COURSE_FORMAT.get(course or "", "")}
+{variant}
 
 Write:
 1. "enemy": a fun 2-3 word monster name tied to the topic (e.g. "Gradient Golem", "Reluctance Wraith").

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from studyquest import ai, app as app_mod, encounter, mathcheck, progress
 
 RIGHT = {"mcq": "B", "numeric": "-1", "expression": "2xy", "multi": "(2, -2, -1)", "short": "CORRECT idea"}
+WRONG = {"mcq": "D", "numeric": "12345", "expression": "x + 1", "multi": "(9, 9, 9)", "short": "no idea"}
 
 
 @pytest.fixture()
@@ -19,7 +20,7 @@ def _reading_id(imported):
 
 def _answer(c, tid, view, right=True):
     p = view["problem"]
-    text = RIGHT[p["type"]] if right else "definitely wrong 999"
+    text = RIGHT[p["type"]] if right else WRONG[p["type"]]
     return c.post("/api/battle/answer", json={"task_id": tid, "idx": p["idx"], "answer": text}).json()
 
 

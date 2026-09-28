@@ -80,6 +80,20 @@
         "Solution exam 2.pdf"
       ],
       "scope": "Chapter 1: 14.1–14.8 (limits, partials, chain rule, gradient, tangent planes, linearization, extrema, Lagrange)"
+    },
+    {
+      "id": "mect313-midterm",
+      "course": "MECT313",
+      "name": "Midterm Keep Boss",
+      "unlock_after_session": "Midterm review: AC fundamentals & sync generators",
+      "minutes": 60,
+      "questions": 15,
+      "format": "mcq",
+      "sources": [
+        "ch1-mag field-fl-22.pptx",
+        "ch2-Trans-M.pptx"
+      ],
+      "scope": "Ch1 magnetic circuits, Ch2 transformers (ideal/real, equivalent circuits, OC/SC tests, regulation, efficiency, per-unit, 3-phase), Ch4 AC fundamentals, Ch5 synchronous generators"
     }
   ],
   "ocr_skip": [

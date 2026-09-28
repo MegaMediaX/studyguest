@@ -7,7 +7,7 @@ import random
 import secrets
 import time
 
-from . import bounties, encounter, perks, progress, review, store
+from . import bounties, perks, progress, review, rewards, store
 
 MAX_FLOORS = 4
 CHEST_ODDS = {"cosmetic": 0.60, "consumable": 0.30, "rare": 0.10}
@@ -29,15 +29,24 @@ def start(p: dict, plan: dict, zone: str | None = None) -> dict:
         return p["run"]
     if zone:
         from . import world
-        return _new_run(p, world.zone_queue(p, plan, zone, MAX_FLOORS), zone,
+        return _new_run(p, with_chimera(p, plan, world.zone_queue(p, plan, zone, MAX_FLOORS)), zone,
                         next(z["name"] for r in world.build(p, plan) for z in r["zones"] if z["id"] == zone))
     session = _session_for_run(p, plan)
     if not session:
         raise KeyError("No session to run.")
-    queue = []
-    due = review.due_cards(p)
-    if due:
-        queue.append({"task_id": due[0]["task_id"], "mode": "review"})
+    return _new_run(p, plan_queue(p, plan, session), session["id"], session["session"])
+
+
+MAX_REVIEWS = 2
+
+
+def plan_queue(p: dict, plan: dict, session: dict | None = None) -> list[dict]:
+    """Up to 2 due rematches first (spacing decides), then the session's open tasks, then — if enough
+    earlier battles exist in this course — a mixed-topic Chimera as the final floor (interleaving)."""
+    session = session or _session_for_run(p, plan)
+    if not session:
+        raise KeyError("No session to run.")
+    queue = [{"task_id": c["task_id"], "mode": "review"} for c in review.interleave(review.due_cards(p))[:MAX_REVIEWS]]
     for t in session["tasks"]:
         if len(queue) >= MAX_FLOORS:
             break
@@ -45,7 +54,17 @@ def start(p: dict, plan: dict, zone: str | None = None) -> dict:
             queue.append({"task_id": t["id"], "mode": "task"})
     if not queue:
         raise KeyError("Nothing left to fight on this floor. Try the Review tab or tomorrow's session.")
-    return _new_run(p, queue, session["id"], session["session"])
+    return with_chimera(p, plan, queue)
+
+
+def with_chimera(p: dict, plan: dict, queue: list[dict]) -> list[dict]:
+    from .encounter import chimera_problems
+    if len(queue) < 2:
+        return queue
+    probe = {"queue": queue}
+    if len(chimera_problems(p, plan, probe)) < 3:
+        return queue
+    return queue[:MAX_FLOORS - 1] + [{"task_id": f"chimera:{secrets.token_hex(3)}", "mode": "chimera"}]
 
 
 def _new_run(p: dict, queue: list[dict], where_id: str, label: str) -> dict:
@@ -55,12 +74,34 @@ def _new_run(p: dict, queue: list[dict], where_id: str, label: str) -> dict:
     return p["run"]
 
 
-def affix_for(run: dict, floor: int) -> str | None:
-    """Rule-based enemy affixes: last floor of a 3+ floor run is an elite that demands proof."""
+def skip_done(p: dict) -> dict | None:
+    """Floors whose task you finished outside the run are skipped, so a run can never get stuck."""
+    run = p.get("run")
+    if not run or run["state"] != "active":
+        return None
+    while run["floor"] < len(run["queue"]):
+        entry = run["queue"][run["floor"]]
+        if entry["mode"] != "task" or not progress.is_done(p, entry["task_id"]):
+            break
+        run["log"].append({"task_id": entry["task_id"], "enemy": "(already cleared)", "won": True, "stars": 0,
+                           "skipped": True})
+        run["floor"] += 1
+    if run["floor"] >= len(run["queue"]):
+        return finish(p)
+    return public(run)
+
+
+def affix_for(run: dict, floor: int, p: dict | None = None) -> str | None:
+    """Rule-based affixes. The last floor of a 3+ floor run is an elite that demands proof (unless it's the
+    Chimera). Armored only on rematches of cards you've already recalled once (box ≥ 1), never on fresh
+    failures — that would trap the weakest topics in a lose-repeat loop."""
     n = len(run["queue"])
+    entry = run["queue"][floor]
+    if entry["mode"] == "chimera":
+        return None
     if n >= 3 and floor == n - 1:
         return "demands_proof"
-    if run["queue"][floor]["mode"] == "review":
+    if entry["mode"] == "review" and p and p.get("review", {}).get(entry["task_id"], {}).get("box", 0) >= 1:
         return "armored"
     return None
 
@@ -69,6 +110,8 @@ def on_battle_end(p: dict, enc: dict, outcome: dict) -> dict:
     run = p.get("run")
     if not run or run["state"] != "active" or enc.get("run_id") != run["id"]:
         return {}
+    if run["floor"] >= len(run["queue"]) or run["queue"][run["floor"]]["task_id"] != enc["task_id"]:
+        return {}  # only the current floor's battle can advance the run
     run["log"].append({"task_id": enc["task_id"], "enemy": enc["enemy"], "won": outcome["outcome"] == "won",
                        "stars": outcome.get("stars", 0)})
     run["floor"] += 1
@@ -81,7 +124,8 @@ def on_battle_end(p: dict, enc: dict, outcome: dict) -> dict:
 def _accuracy(p: dict, run: dict) -> float:
     res = [r for tid in [q["task_id"] for q in run["queue"]]
            for r in (p.get("encounters", {}).get(tid, {}) or {}).get("results", [])]
-    return sum(1 for r in res if r["correct"] and r["tries"] == 1) / len(res) if len(res) >= 5 else 0.0
+    clean = sum(1 for r in res if r["correct"] and r["tries"] == 1 and r["hints"] == 0)
+    return clean / len(res) if len(res) >= 5 else 0.0
 
 
 def choose_perk(p: dict, perk_id: str) -> dict:
@@ -150,12 +194,12 @@ def _rare(inv: dict, rnd: random.Random) -> dict | None:
 
 
 def _cosmetic(inv: dict, rnd: random.Random) -> dict | None:
-    titles = [t for t in encounter.LOOT_TITLES if t not in inv["titles"]]
-    themes = [t for t in encounter.LOOT_THEMES if t not in inv["themes"]]
+    titles = [t for t in rewards.LOOT_TITLES if t not in inv["titles"]]
+    themes = [t for t in rewards.LOOT_THEMES if t not in inv["themes"]]
     if themes and (not titles or rnd.random() < 0.4):
         t = rnd.choice(themes)
         inv["themes"].append(t)
-        return {"kind": "theme", "name": t, "color": encounter.LOOT_THEMES[t], "rarity": "rare"}
+        return {"kind": "theme", "name": t, "color": rewards.LOOT_THEMES[t], "rarity": "rare"}
     if titles:
         t = rnd.choice(titles)
         inv["titles"].append(t)

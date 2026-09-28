@@ -2,8 +2,8 @@
   "greet": [
     "Back at the forge. Let's see what the Rift sends today.",
     "Tea's hot, enemies are cold. Pick a floor.",
-    "Every exam I failed started with 'I'll study later'. Not you. Not today.",
-    "One run. Twenty-five minutes. Then we talk."
+    "One run. Twenty-five minutes. Then we talk.",
+    "Small steps win exams. Pick one floor and start."
   ],
   "first_crit": [
     "That's a crit! Momentum is the best teacher you've got.",
@@ -14,12 +14,12 @@
     "Three misses. Stop and look at the unit vector: did you divide by its length?",
     "Slow down: write the formula first, then plug in. The formula is on the scroll.",
     "Check signs before arithmetic. It's almost always a sign.",
-    "Take the nudge hint. A 25% haircut beats guessing."
+    "Take the nudge hint. It costs a little damage and saves the whole fight."
   ],
   "hint_used": [
     "Good. Asking is a skill, not a weakness.",
-    "Read the hint, then close your eyes and say the next step out loud.",
-    "Hints are borrowed strength. Pay it back on the next problem."
+    "Read the hint, then say the next step out loud before you type.",
+    "Hints are part of learning. Try the next problem without one."
   ],
   "win": [
     "Down it goes. Write the key formula once on paper before the next one.",
@@ -28,7 +28,7 @@
   ],
   "escaped": [
     "It ran. You kept the notes. They'll be sharper next time.",
-    "Losing a fight isn't losing the war. The rematch has fresh problems.",
+    "Losing a fight isn't losing the war. The rematch will have new problems.",
     "Not today. Look at the worked solutions, then we go again tomorrow."
   ],
   "perk": [

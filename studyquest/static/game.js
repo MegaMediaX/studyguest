@@ -1,7 +1,8 @@
 // Meta layer: mentor "Old Vex", runs + perk draft, chests, bounties, economy chip, hyperfocus guard.
 "use strict";
 
-const G = { lines: null, run: null, saidThisBattle: 0, saidThisRun: 0, appOpened: Date.now(), longWarned: false };
+const G = { lines: null, run: null, saidThisBattle: 0, saidThisRun: 0, playStarted: null, longWarnedAt: 0 };
+const LONG_SESSION_MS = 90 * 60000;
 
 // ---------- mentor ----------
 async function mentorLines() {
@@ -136,7 +137,7 @@ async function openChest() {
       for (let i = 0; i < r.shakes; i++) { chest.classList.remove("wiggle"); void chest.offsetWidth; chest.classList.add("wiggle"); await new Promise((ok) => setTimeout(ok, 420)); }
       FX.play("chest"); FX.flash(); chest.textContent = "✨";
       const d = r.drop;
-      $("#chest-result").innerHTML = `<div class="loot ${d.rarity === "legendary" ? "epic" : d.rarity}" style="max-width:420px;margin:12px auto">
+      $("#chest-result").innerHTML = `<div class="loot ${esc(d.rarity === "legendary" ? "epic" : d.rarity)}" style="max-width:420px;margin:12px auto">
           ${d.kind === "theme" ? `<span class="swatch" style="background:${esc(d.color)}"></span> Theme: ${esc(d.name)}` : d.kind === "title" ? `🎖️ Title: ${esc(d.name)}` : `🧪 ${esc(d.name)}`}
           <span class="rarity">${esc(d.rarity)}</span></div>`;
       $("#crack").outerHTML = r.economy.keys > 0 ? `<button class="btn primary" id="again">Open another (${r.economy.keys} 🔑)</button>` : "";
@@ -146,13 +147,23 @@ async function openChest() {
 }
 
 // ---------- hyperfocus guard ----------
-setInterval(() => {
-  if (G.longWarned || Date.now() - G.appOpened < 90 * 60000 || S.phase === "battle") return;
-  G.longWarned = true;
-  document.body.insertAdjacentHTML("beforeend", `<div id="longsession" class="overlay"><div class="card center"><div class="monster">🧙</div>
+// Counts from your first battle of this sitting; shown only between battles, never mid-problem.
+function notePlay() { if (!G.playStarted) G.playStarted = Date.now(); }
+function maybeLongSession() {
+  if (!G.playStarted || Date.now() - G.playStarted < LONG_SESSION_MS || Date.now() - G.longWarnedAt < LONG_SESSION_MS) return;
+  if ($("#longsession")) return;
+  G.longWarnedAt = Date.now();
+  document.body.insertAdjacentHTML("beforeend", `<div id="longsession" class="overlay" role="dialog" aria-modal="true" aria-label="Long session"><div class="card center"><div class="monster">🧙</div>
       <h1>Bank the win?</h1><p id="long-line" class="muted"></p>
+      <p class="small muted">Stopping now earns a rested bonus: +1 ◆ key shard (once a day).</p>
       <div class="row" style="justify-content:center"><button class="btn primary" id="stop-now">Stop for now</button><button class="btn" id="one-more">One more floor</button></div></div></div>`);
   mentorLines().then((l) => { $("#long-line").textContent = (l.long_session || [""])[0]; });
-  $("#stop-now").onclick = () => { $("#longsession").remove(); app.innerHTML = `<section class="card center"><h1>See you tomorrow ⚔️</h1><p class="muted">Rest is when memory sets.</p></section>`; };
+  $("#stop-now").focus();
+  $("#stop-now").onclick = async () => {
+    $("#longsession").remove();
+    try { celebrate((await api("/api/rest", { method: "POST" })).events); } catch { /* bonus is optional */ }
+    G.playStarted = null;
+    app.innerHTML = `<section class="card center"><h1>See you tomorrow ⚔️</h1><p class="muted">Rest is when memory sets.</p></section>`;
+  };
   $("#one-more").onclick = () => $("#longsession").remove();
-}, 60000);
+}

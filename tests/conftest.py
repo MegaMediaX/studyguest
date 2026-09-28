@@ -26,6 +26,7 @@ class FakeAI:
     def __init__(self):
         self.calls = []
         self.gemini_score = None  # set to force a Gemini disagreement
+        self.key_answers = None   # Gemini's blind answers for keycheck
 
     def __call__(self, provider, prompt, images):
         self.calls.append((provider, prompt[:80]))
@@ -50,6 +51,8 @@ class FakeAI:
                  "explain": "x", "source": src2},
                 {"type": "numeric", "prompt": "broken key", "answer": "two and a half", "difficulty": 3,
                  "hints": ["h"], "explain": "x"}]})
+        if prompt.startswith("Solve each problem independently"):
+            return json.dumps({"answers": self.key_answers or []})
         if prompt.startswith("Grade a one-line"):
             return json.dumps({"score": 1.0 if "CORRECT" in prompt else 0.0, "feedback": "ok"})
         if prompt.startswith("An auto-grader marked"):

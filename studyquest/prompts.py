@@ -89,9 +89,12 @@ Reply with JSON only: {{"questions": [{{"q": "...", "answer": "...", "type": "fo
 
 
 def boss(cfg: dict, chunks: list[dict]) -> str:
+    fmt = ("Every question is multiple choice with 4 options (A–D) and plausible distractors from common "
+           "mistakes; the answer is the letter." if cfg.get("format") == "mcq" else
+           "Base every question on a past-exam question in the sources (you may change numbers slightly). "
+           "Each question needs a short final answer that can be checked.")
     return f"""Build a {cfg['minutes']}-minute mock exam "{cfg['name']}" with {cfg['questions']} questions.
-Scope: {cfg['scope']}. Base every question on a past-exam question in the sources (you may change numbers
-slightly). Each question needs a short final answer that can be checked.
+Scope: {cfg['scope']}. {fmt} Put the options inside the question text.
 Reply with JSON only: {{"questions": [{{"q": "...", "answer": "...", "points": 10,
   "source": {{"file": "...", "n": 1}}}}]}}
 

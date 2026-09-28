@@ -81,9 +81,11 @@ setInterval(tick, 1000);
 // ---------- navigation ----------
 document.querySelectorAll("nav button[data-view]").forEach((b) => b.addEventListener("click", () => go(b.dataset.view)));
 $("#sound-toggle").addEventListener("click", async () => {
-  S.settings.sound = !S.settings.sound;
+  const before = S.settings.sound;
+  S.settings.sound = !before;
   $("#sound-toggle").textContent = S.settings.sound ? "🔊" : "🔈";
-  await api("/api/settings", { json: S.settings });
+  try { await api("/api/settings", { json: S.settings }); }
+  catch (e) { S.settings.sound = before; $("#sound-toggle").textContent = before ? "🔊" : "🔈"; toast("Couldn't save the sound setting"); }
 });
 function go(view) {
   S.view = view;
@@ -133,15 +135,17 @@ async function renderQuest() {
     ${riftBanner(t.rift)}
     <section class="card" id="task-card">
       <p class="eyebrow">${t.label === "today" ? "Today's floor" : "Next floor"} · ${esc(s.date_label)} · ${esc(s.time)} · ${esc(s.subject)}</p>
-      <h2>${esc(s.session)}</h2>
+      <h1 class="floor-title">${esc(s.session)}</h1>
       <div class="floor-progress"><div style="width:${Math.round((100 * cleared) / s.total)}%"></div></div>
       <div class="path">${nodes}</div>
-      <p class="eyebrow">Encounter ${S.taskIndex + 1} of ${s.total} ${task.status === "review" ? "· 🔁 rematch" : ""}</p>
+      <p class="eyebrow">Selected task · ${S.taskIndex + 1} of ${s.total} in this session ${task.status === "review" ? "· 🔁 rematch" : ""}</p>
       <div class="task-text">${esc(task.text)}</div>
       <div class="row">${runBtn}</div>
-      <div class="row"><button class="btn" id="start">${task.kind === "action" ? "📌 Mark with proof" : fighting ? "⚔️ Resume this battle" : "⚔️ Just this one"}</button>
-        ${G.run ? `<button class="btn link" id="abandon">End run</button>` : ""}</div>
-      <div class="row spread"><span>${where}${qw}</span><span><button class="btn link" id="skip">Other encounter ›</button></span></div>
+      <details class="more"><summary>Other options</summary>
+        <div class="row"><button class="btn" id="start">${task.kind === "action" ? "📌 Mark this task with proof" : fighting ? "⚔️ Resume this battle" : "⚔️ Fight only this task"}</button>
+          ${G.run ? `<button class="btn" id="abandon">End run</button>` : ""}
+          <button class="btn" id="skip">Select another task ›</button>${where.replace("btn link", "btn")}${qw.replace("btn link", "btn")}</div>
+      </details>
       <div id="help"></div>
       ${t.backlog.tasks ? `<p class="muted small" style="margin-top:14px">${t.backlog.tasks} earlier encounter(s) still open. They're on the Map.</p>` : ""}
     </section>${bounty}`;
@@ -154,10 +158,8 @@ async function renderQuest() {
   document.querySelectorAll(".node").forEach((n) => (n.onclick = () => { S.taskIndex = +n.dataset.i; renderQuest(); }));
   if (t.last) $("#where").onclick = () => whereWasI(t.last);
   if (qw) $("#qw").onclick = () => renderQuickWins();
-  // warm the next battles so they open instantly
-  const upcoming = s.tasks.filter((x) => x.status === "todo" && x.kind !== "action").map((x) => x.id);
-  const order = [task.id, ...upcoming.filter((id) => id !== task.id)].slice(0, 3);
-  api("/api/battle/prefetch", { json: { task_ids: order } }).catch(() => {});
+  // warm the run's floors (including floor 1) so Start opens instantly
+  api("/api/run/preview").then((r) => api("/api/battle/prefetch", { json: { task_ids: r.queue.slice(0, 4) } })).catch(() => {});
 }
 function nextIndex(tasks, i) {
   for (let k = 1; k <= tasks.length; k++) { const j = (i + k) % tasks.length; if (tasks[j].status !== "done" && tasks[j].status !== "override") return j; }
@@ -273,7 +275,10 @@ function celebrate(events, quiet = false) {
 }
 function handleResult(r) {
   const c = S.check;
-  if (r.status === "wait") return toast(`Hint time: ${r.seconds}s left`);
+  if (r.status === "wait") {
+    const b = $("#submit-check"); if (b) { b.disabled = false; b.textContent = "Check"; }
+    return toast(`Hint time: ${r.seconds}s left`);
+  }
   if (r.status === "disagree") return renderDisagree(r);
   if (r.status === "passed") {
     celebrate(r.events);
@@ -415,7 +420,7 @@ async function renderBoss(id) {
 }
 
 // ---------- stats ----------
-function heatColor(v) { return v <= 0 ? "var(--line)" : `rgba(94,234,212,${0.18 + v * 0.7})`; }
+
 async function renderStats() {
   loading("Loading stats…");
   try {
@@ -428,7 +433,8 @@ async function renderStats() {
         <div class="stat"><span class="muted">Sprints</span><b>${s.sprints}</b></div>
       </div></section>
       <section class="card"><h2>Exams</h2>${s.exams.map((e) => `<div class="exam"><span>${esc(e.name)}${e.room ? ` · ${esc(e.time)} ${esc(e.room)}` : ""}</span><b>${e.days === 0 ? "TODAY" : `${e.days} day${e.days === 1 ? "" : "s"}`}</b></div>`).join("")}</section>
-      <section class="card"><h2>Mastery by topic</h2><div class="heat">${s.mastery.map((m) => `<div style="background:${heatColor(m.score)}" title="${Math.round(m.score * 100)}%"><b>${esc((m.date || "").slice(5))}</b> ${esc(m.topic)}</div>`).join("")}</div></section>
+      <section class="card"><h2>Mastery by topic</h2><div class="heat">${s.mastery.map((m) => `<div class="heat-tile"><b>${esc((m.date || "").slice(5))}</b> ${esc(m.topic)}
+        <span class="heat-pct">${Math.round(m.score * 100)}%</span><span class="heat-bar"><span style="width:${Math.round(m.score * 100)}%"></span></span></div>`).join("")}</div></section>
       <section class="card" id="inventory"><h2>Inventory</h2><p class="muted">Loading…</p></section>
       <section class="card"><h2>Settings & data</h2>
         <div class="row"><label>Campfire every <input type="number" id="set-sprint" min="5" max="60" value="${S.settings.sprint_min}" style="width:70px"> min</label>

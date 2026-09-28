@@ -1,16 +1,48 @@
-"""Spaced review (Leitner boxes: 1, 3, 7 days), interleaved rounds, and the daily '3 quick wins'."""
+"""Spaced review (Leitner boxes: 1, 2, 4 days, pulled in before the exam), interleaved rounds, 3 quick wins.
+
+Every task gets a card: failed tasks after two escapes, won tasks right after the win. A card's due date
+is never later than the day before its course's next exam, so everything gets one more look in time."""
 import random
 from datetime import date, timedelta
 
 from . import ai, corpus, progress, prompts, store
 from .importer import all_tasks
 
-INTERVALS = [1, 3, 7]  # days until the next review after landing in box 0, 1, 2
+INTERVALS = [1, 2, 4]  # days until the next review after landing in box 0, 1, 2
 ROUND_SIZE = 5
 
 
-def _due(days: int) -> str:
-    return (store.today() + timedelta(days=days)).isoformat()
+def _due(days: int, plan: dict | None = None, tid: str | None = None) -> str:
+    """today + days, but no later than the day before this task's course exam (when that's still ahead)."""
+    today = store.today()
+    due = today + timedelta(days=days)
+    cap = _exam_cap(plan, tid) if plan and tid else None
+    if cap and today < cap < due:
+        due = cap
+    return due.isoformat()
+
+
+def _exam_cap(plan: dict, tid: str):
+    from .corpus import course_for_subject
+    from .quest import exams_countdown
+    try:
+        session, _ = progress.find_task(plan, tid)
+    except KeyError:
+        return None
+    course = course_for_subject(session["subject"])
+    exam = next((e for e in exams_countdown() if e["course"] == course and e["days"] >= 2), None)
+    return date.fromisoformat(exam["date"]) - timedelta(days=1) if exam else None
+
+
+def schedule(p: dict, plan: dict, tid: str) -> list[dict]:
+    """A won task enters spaced review (box 0 → back tomorrow) unless it already has a card."""
+    if tid in p["review"]:
+        return []
+    session, _ = progress.find_task(plan, tid)
+    p["review"][tid] = {"box": 0, "due": _due(INTERVALS[0], plan, tid), "topic": session["session"],
+                        "subject": session["subject"], "lapses": 0}
+    progress.log(p, "review_add", tid, due=p["review"][tid]["due"], why="won")
+    return [{"type": "review_scheduled", "due": p["review"][tid]["due"]}]
 
 
 def on_fail(p: dict, plan: dict, tid: str, from_review: bool = False) -> list[dict]:
@@ -19,7 +51,7 @@ def on_fail(p: dict, plan: dict, tid: str, from_review: bool = False) -> list[di
     if st["status"] not in {"done", "override"}:
         st["status"] = "review"
     session, _ = progress.find_task(plan, tid)
-    p["review"][tid] = {"box": 0, "due": _due(INTERVALS[0]), "topic": session["session"],
+    p["review"][tid] = {"box": 0, "due": _due(INTERVALS[0], plan, tid), "topic": session["session"],
                         "subject": session["subject"], "lapses": p["review"].get(tid, {}).get("lapses", 0) + 1}
     progress.log(p, "review_add", tid, due=p["review"][tid]["due"])
     return [{"type": "review_later", "due": p["review"][tid]["due"]}]
@@ -35,7 +67,7 @@ def on_pass(p: dict, plan: dict, tid: str) -> list[dict]:
         p["review"].pop(tid)
         progress.log(p, "review_graduated", tid)
         return [{"type": "graduated"}] + progress.record_pass(p, plan, tid, first_try=False)
-    card["due"] = _due(INTERVALS[card["box"]])
+    card["due"] = _due(INTERVALS[card["box"]], plan, tid)
     progress.log(p, "review_pass", tid, box=card["box"], due=card["due"])
     events = [{"type": "review_up", "box": card["box"], "due": card["due"]}]
     # The task itself counts as done once you recall it in review; the card keeps coming back until graduated.

@@ -251,3 +251,44 @@ main:has(.worldmap) { max-width: 900px; }
 .tier-mastered { color: var(--gold); border-color: #5a4a1a; } .tier-attempted { color: #cbd5e1; }
 @keyframes haze { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
 @media (max-width: 560px) { .zone-grid { grid-template-columns: 1fr; } .worldmap .node-sub { display: none; } }
+
+/* ---------- review fixes ---------- */
+.floor-title { font-size: 1.3rem; margin: 0 0 10px; }
+details.more { margin-top: 14px; }
+details.more > summary { cursor: pointer; color: var(--muted); font-size: .95rem; padding: 6px 0; list-style: none; }
+details.more > summary::before { content: "▸ "; } details.more[open] > summary::before { content: "▾ "; }
+details.more .row { margin-top: 8px; }
+/* keep the enemy in view while you fight */
+.battle { scroll-margin-top: 84px; }
+.battle .enemy { position: sticky; top: 72px; z-index: 4; background: var(--panel); padding-top: 8px; margin-top: 18px; }
+.stagger { color: var(--gold); font-weight: 700; font-size: .85rem; margin-top: 4px; }
+.fmt { color: var(--muted); font-size: .85rem; margin: 6px 2px 0; }
+#fx { scroll-margin-bottom: 24px; }
+/* mastery tiles: readable text, the score as a bar + number */
+.heat .heat-tile { background: var(--bg); border: 1px solid var(--line); position: relative; padding-bottom: 16px; }
+.heat-pct { display: block; font-weight: 800; color: var(--text); margin-top: 4px; }
+.heat-bar { position: absolute; left: 10px; right: 10px; bottom: 8px; height: 4px; background: var(--line); border-radius: 99px; overflow: hidden; }
+.heat-bar span { display: block; height: 100%; background: var(--accent); }
+/* form controls on the dark theme */
+input[type=number], select { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 10px; min-height: 44px; padding: 8px 10px; font-size: 1rem; }
+input[type=checkbox] { width: 22px; height: 22px; accent-color: var(--accent); vertical-align: middle; }
+input::placeholder, textarea::placeholder { color: #8b93a7; }
+nav button { min-height: 44px; }
+/* reader zoom: pan instead of squint */
+.reader-body { justify-content: flex-start; }
+.reader-body img { max-width: none; margin: 0 auto; }
+/* zone list (phones) */
+.zone-list { display: flex; flex-direction: column; align-items: stretch; padding: 14px; }
+.zone-item { display: flex; gap: 12px; align-items: center; text-align: left; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 14px; padding: 12px; min-height: 64px; cursor: pointer; }
+.zone-item.open { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.zone-item.sealed { border-color: #5a4a1a; } .zone-item.locked { opacity: .6; }
+.zone-item.selected { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+.zi-icon { font-size: 1.8rem; width: 40px; text-align: center; } .zi-main { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.zi-sub { color: var(--muted); font-size: .8rem; } .zi-edge { width: 2px; height: 14px; background: var(--line); margin: 0 0 0 31px; }
+.zone-item .mini-bar span { display: block; height: 100%; background: var(--accent); }
+@media (max-width: 560px) { .battle .enemy { top: 110px; } .battle { scroll-margin-top: 120px; } }
+@media (max-width: 560px) {
+  .intent { position: static; transform: none; display: inline-block; margin: 0 0 4px; white-space: normal; }
+  .monster-wrap { display: flex; flex-direction: column; align-items: flex-start; }
+}

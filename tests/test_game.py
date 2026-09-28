@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from studyquest import ai, app as app_mod, bounties, perks, progress, run
 
 RIGHT = {"mcq": "B", "numeric": "-1", "expression": "2xy", "multi": "(2, -2, -1)", "short": "CORRECT idea"}
+WRONG = {"mcq": "D", "numeric": "12345", "expression": "x + 1", "multi": "(9, 9, 9)", "short": "no idea"}
 
 
 @pytest.fixture()
@@ -55,7 +56,7 @@ def test_glass_cannon_doubles_damage_and_blocks_hints(client, imported):
     assert v["rules"]["no_hints"]
     assert client.post("/api/battle/hint", json={"task_id": tid, "idx": v["problem"]["idx"]}).status_code == 409
     r = client.post("/api/battle/answer", json={"task_id": tid, "idx": v["problem"]["idx"], "answer": "B"}).json()
-    assert r["damage"] == 200
+    assert r["damage"] == 150  # ×2 perk, capped at MAX_PERK_MULT
 
 
 def test_demands_proof_affix_ends_with_explanation(client, imported):
@@ -118,7 +119,8 @@ def test_ghost_of_past_self(client, imported, monkeypatch):
     # first attempt: miss everything once, then answer right (half damage) → a weak ghost
     v = client.post("/api/battle/start", json={"task_id": tid}).json()
     while True:
-        m = client.post("/api/battle/answer", json={"task_id": tid, "idx": v["problem"]["idx"], "answer": "zzz"}).json()
+        m = client.post("/api/battle/answer", json={"task_id": tid, "idx": v["problem"]["idx"],
+                                                     "answer": WRONG[v["problem"]["type"]]}).json()
         r = client.post("/api/battle/answer", json={"task_id": tid, "idx": m["problem"]["idx"],
                                                      "answer": RIGHT[m["problem"]["type"]]}).json()
         if r.get("outcome"):
@@ -135,7 +137,7 @@ def test_retry_token_undoes_a_miss(client, imported):
         p["economy"] = {"shards": 0, "keys": 0, "chests_since_rare": 0, "consumables": {"retry_token": 1}}
     tid = imported["plan"]["sessions"][0]["tasks"][0]["id"]
     v = client.post("/api/battle/start", json={"task_id": tid}).json()
-    client.post("/api/battle/answer", json={"task_id": tid, "idx": v["problem"]["idx"], "answer": "zzz"})
+    client.post("/api/battle/answer", json={"task_id": tid, "idx": v["problem"]["idx"], "answer": "D"})
     t = client.post("/api/battle/token", json={"task_id": tid, "kind": "retry_token"}).json()
     assert t["tries"] == 0
     r = client.post("/api/battle/answer", json={"task_id": tid, "idx": v["problem"]["idx"], "answer": "B"}).json()

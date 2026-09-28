@@ -158,10 +158,33 @@ def check(kind: str, student: str, key, choices: list | None = None, tolerance: 
 def _choice_index(student: str, choices: list) -> int | None:
     s = student.strip().lower().rstrip(").")
     if len(s) == 1 and s in "abcdef":
-        return "abcdef".index(s)
+        i = "abcdef".index(s)
+        return i if i < max(len(choices), 1) else None
     if s.isdigit():
         return int(s) - 1 if 1 <= int(s) <= max(len(choices), 1) else None
     for i, c in enumerate(choices):
         if s == str(c).strip().lower():
             return i
     return None
+
+
+def readable(kind: str, student: str, choices: list | None = None, key=None) -> bool:
+    """Can we even read this answer? Unreadable input must not cost an attempt."""
+    student = str(student or "").strip()
+    if not student:
+        return False
+    try:
+        if kind == "mcq":
+            return _choice_index(student, choices or []) is not None
+        if kind in {"numeric", "expression"}:
+            parse(student)
+            return True
+        if kind == "multi":
+            parts = split_multi(student)
+            for part in parts:
+                parse(part)
+            expected = len(split_multi(str(key))) if key is not None else None
+            return bool(parts) and (expected is None or len(parts) == expected)
+    except NotMath:
+        return False
+    return True

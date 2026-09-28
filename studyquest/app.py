@@ -7,7 +7,8 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import ai, boss, bounties, checker, encounter, importer, progress, quest, review, run, sources, store, world
+from . import (ai, boss, bounties, checker, encounter, importer, progress, quest, review, rewards, run, sources,
+               store, world)
 
 STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -69,7 +70,7 @@ def api_status():
     p = progress.load()
     theme = p["settings"].get("equipped", {}).get("theme")
     return {"ai": ai.status(), "has_plan": has_plan, "settings": p["settings"],
-            "theme_color": encounter.LOOT_THEMES.get(theme) if theme else None}
+            "theme_color": rewards.theme_color(theme)}
 
 
 @app.get("/api/today")
@@ -270,8 +271,8 @@ def api_export():
 # ---------- battles ----------
 
 class BattleStart(BaseModel):
-    task_id: str
-    mode: str = Field("task", pattern="^(task|review)$")
+    task_id: str = Field(max_length=40)
+    mode: str = Field("task", pattern="^(task|review|chimera)$")
     run_id: str | None = Field(None, max_length=12)
 
 
@@ -337,7 +338,36 @@ def api_source_img(course: str, file: str, n: int):
 
 @app.get("/api/inventory")
 def api_inventory():
-    return encounter.inventory(progress.load())
+    return rewards.inventory(progress.load())
+
+
+@app.post("/api/battle/lesson")
+def api_battle_lesson(body: BattleRef):
+    encounter.lesson_opened(body.task_id)
+    return {"ok": True}
+
+
+@app.get("/api/run/preview")
+def api_run_preview():
+    """The floors a run would have right now, so the UI can prefetch them before you press Start."""
+    p, plan = _state()
+    if p.get("run") and p["run"]["state"] == "active":
+        return {"queue": [q["task_id"] for q in p["run"]["queue"][p["run"]["floor"]:]]}
+    try:
+        return {"queue": [q["task_id"] for q in run.plan_queue(p, plan)]}
+    except KeyError:
+        return {"queue": []}
+
+
+@app.post("/api/rest")
+def api_rest():
+    """Stopping after a long session pays: one key shard, once a day (hyperfocus guard)."""
+    with progress.transaction() as p:
+        today = store.today().isoformat()
+        if p.get("rested_on") == today:
+            return {"events": []}
+        p["rested_on"] = today
+        return {"events": bounties.add_shards(p, 1, "rested")}
 
 
 class Equip(BaseModel):
@@ -355,10 +385,10 @@ def api_equip(body: Equip):
                 raise HTTPException(400, "You haven't found that title yet.")
             eq["title"] = body.title
         if body.theme is not None:
-            if body.theme not in inv["themes"]:
+            if body.theme not in inv["themes"] or not rewards.theme_color(body.theme):
                 raise HTTPException(400, "You haven't found that theme yet.")
             eq["theme"] = body.theme
-        return encounter.inventory(p)
+        return rewards.inventory(p)
 
 
 class Token(BaseModel):
@@ -375,8 +405,10 @@ def api_battle_token(body: Token):
 
 @app.get("/api/run")
 def api_run():
-    r = progress.load().get("run")
-    return {"run": run.public(r) if r and r["state"] == "active" else None}
+    with progress.transaction() as p:
+        run.skip_done(p)
+        r = p.get("run")
+        return {"run": run.public(r) if r and r["state"] == "active" else None}
 
 
 class RunStart(BaseModel):

@@ -4,7 +4,8 @@
 
 const FX = (() => {
   let ctx = null;
-  const mode = () => (S.settings?.fx || "full");
+  const reduced = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const mode = () => (reduced() && (S.settings?.fx || "full") === "full" ? "calm" : (S.settings?.fx || "full"));
   const soundOn = () => S.settings?.sound !== false && mode() !== "off";
   function ac() { if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)(); return ctx; }
 

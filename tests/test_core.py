@@ -105,10 +105,10 @@ def test_leitner_boxes(imported):
     review.on_fail(p, plan, tid)
     assert p["tasks"][tid]["status"] == "review" and p["review"][tid]["due"] == "2026-09-29"
     review.on_pass(p, plan, tid)
-    assert p["review"][tid]["box"] == 1 and p["review"][tid]["due"] == "2026-10-01"
+    assert p["review"][tid]["box"] == 1 and p["review"][tid]["due"] == "2026-09-30"
     assert p["tasks"][tid]["status"] == "done" and p["xp"] == 5
     review.on_pass(p, plan, tid)
-    assert p["review"][tid]["due"] == "2026-10-05"
+    assert p["review"][tid]["due"] == "2026-10-02"
     events = review.on_pass(p, plan, tid)
     assert tid not in p["review"] and events[0]["type"] == "graduated"
     assert p["xp"] == 5  # already done: no extra XP on graduation
@@ -170,3 +170,21 @@ def test_claude_cmd_disables_hooks_and_tools():
     cmd = ai.claude_cmd([])
     assert "--settings" in cmd and "disableAllHooks" in cmd[cmd.index("--settings") + 1]
     assert cmd[cmd.index("--tools") + 1] == ""
+
+
+def test_review_due_dates_never_pass_the_exam(imported, monkeypatch):
+    p, plan = progress.load(), imported["plan"]
+    tid = plan["sessions"][0]["tasks"][0]["id"]  # Calc II → MATH202 Exam I on 2026-10-08
+    monkeypatch.setenv("STUDYQUEST_TODAY", "2026-10-05")
+    review.on_fail(p, plan, tid)
+    review.on_pass(p, plan, tid)
+    review.on_pass(p, plan, tid)
+    assert p["review"][tid]["due"] <= "2026-10-07"
+
+
+def test_wins_are_scheduled_for_review(imported):
+    p, plan = progress.load(), imported["plan"]
+    tid = plan["sessions"][0]["tasks"][0]["id"]
+    progress.record_pass(p, plan, tid, first_try=True)
+    assert review.schedule(p, plan, tid)[0]["due"] == "2026-09-29"
+    assert review.schedule(p, plan, tid) == []  # no duplicate card

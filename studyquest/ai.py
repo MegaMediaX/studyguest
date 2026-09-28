@@ -116,7 +116,7 @@ runner = None
 
 
 def ask(provider: str, prompt: str, *, images: list[Path] | None = None, want_json: bool = True,
-        cache: bool = True) -> dict | str:
+        cache: bool = True, effort: str | None = None) -> dict | str:
     images = [Path(p) for p in (images or [])]
     key = _cache_key(provider, prompt, images)
     cache_file = store.CACHE / f"{key}.json"
@@ -136,8 +136,8 @@ def ask(provider: str, prompt: str, *, images: list[Path] | None = None, want_js
             elif provider == "claude":
                 text = _unwrap("claude", _run(claude_cmd(images), prompt, timeout))
             else:
-                effort = _cfg().get("gemini_effort", "medium") if attempt == 0 else "low"
-                text = _unwrap("gemini", _run(gemini_cmd(prompt, images, effort), None, timeout + 30))
+                level = effort or (_cfg().get("gemini_effort", "medium") if attempt == 0 else "low")
+                text = _unwrap("gemini", _run(gemini_cmd(prompt, images, level), None, timeout + 30))
             reply = parse_json_reply(text) if want_json else text.strip()
             if cache:
                 store.write_json(cache_file, {"provider": provider, "at": store.now_iso(), "reply": reply})

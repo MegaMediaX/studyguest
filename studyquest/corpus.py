@@ -102,8 +102,14 @@ def course_files() -> list[tuple[str, Path, str]]:
 
 
 def corpus_path(course: str, rel: str) -> Path:
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "_", rel)
-    return store.CORPUS / course / f"{slug}.json"
+    """Only configured course codes; the result is always inside data/corpus/."""
+    if course not in store.load_config()["courses"]:
+        raise KeyError(f"Unknown course {course!r}")
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "_", rel).lstrip(".")
+    path = store.CORPUS / course / f"{slug}.json"
+    if not path.resolve().is_relative_to(store.CORPUS.resolve()):
+        raise KeyError("Bad source path")
+    return path
 
 
 def extract_all(verbose: bool = True) -> dict:
