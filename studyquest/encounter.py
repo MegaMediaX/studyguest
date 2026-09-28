@@ -11,7 +11,9 @@ import secrets
 import threading
 import time
 
-from . import (ai, corpus, keycheck, mathcheck, perks, progress, prompts_game, review, rewards, store)
+from pathlib import Path
+
+from . import (ai, bounties, corpus, keycheck, mathcheck, perks, progress, prompts_game, review, rewards, store)
 from .corpus import course_for_subject
 
 PASS = 0.7
@@ -20,6 +22,7 @@ FIRST_TRY, SECOND_TRY = 1.0, 0.5
 HINT_COST = [0.0, 0.25, 0.5, 1.0]  # fraction of a problem's damage lost at hint level 0..3
 MAX_PERK_MULT = 1.5          # all perk multipliers combined can't exceed this
 CRIT_COMBO, CRIT_MULT = 3, 1.25
+WORK_BONUS, WORK_PENALTY = 1.25, 0.5   # photo of working: valid method bonus / right answer, wrong method
 XP_HIT, XP_HIT_LATE = 2, 1
 XP_CHIMERA = 10
 LOCAL_KINDS = {"mcq", "numeric", "expression", "multi"}
@@ -344,20 +347,45 @@ FORMAT_HELP = {"mcq": "Pick A–D (or 1–4).", "numeric": "Type a number, e.g. 
                "multi": "Type all the parts, e.g. (1, -2) or (2/3, 1/3, 2/3)."}
 
 
-def answer(task_id: str, idx: int, text: str) -> dict:
+def answer(task_id: str, idx: int, text: str, photo: str | None = None) -> dict:
     enc = _active(progress.load(), task_id)
     if enc["current"] != idx:
         raise KeyError("That problem is already finished. Reload.")
     prob = enc["problems"][idx]
+    if photo and prob["type"] == "mcq":
+        photo = None  # nothing to show for a choice
+    work = None
+    if photo:
+        work = _grade_work(prob, text, photo)
+        if not work["readable"]:
+            return {"result": "unreadable", "feedback": f"{work['feedback'] or 'Couldn\'t read the photo.'} "
+                                                        f"Try a sharper, well-lit photo. (No attempt used.)"}
+        if not text.strip():
+            text = work["final_answer"]
     if prob["type"] in LOCAL_KINDS and not mathcheck.readable(prob["type"], text, prob.get("choices"), prob["answer"]):
-        return {"result": "unreadable", "feedback": f"Couldn't read that. {FORMAT_HELP[prob['type']]} "
-                                                    f"(No attempt used.)"}
-    correct, feedback = _grade(prob, text)  # AI (short answers) runs outside the lock
+        if not work:
+            return {"result": "unreadable", "feedback": f"Couldn't read that. {FORMAT_HELP[prob['type']]} "
+                                                        f"(No attempt used.)"}
+        correct, feedback = work["final_correct"], work["feedback"]
+    elif work and prob["type"] == "short":
+        correct, feedback = work["final_correct"], work["feedback"]
+    else:
+        correct, feedback = _grade(prob, text)  # AI (short answers) runs outside the lock
+        if work:
+            feedback = work["feedback"]
     with progress.transaction() as p:
         enc = _active(p, task_id)
         if enc["current"] != idx:
             raise KeyError("That problem is already finished. Reload.")
-        return _resolve(p, enc, prob, text, correct, feedback)
+        return _resolve(p, enc, prob, text, correct, feedback, work)
+
+
+def _grade_work(prob: dict, text: str, photo: str) -> dict:
+    """Claude reads the handwritten working: final answer, method validity, first wrong step."""
+    r = ai.ask("claude", prompts_game.judge_work(prob, text, photo), images=[Path(photo)], cache=False)
+    return {"readable": bool(r.get("readable", True)), "final_answer": str(r.get("final_answer") or ""),
+            "final_correct": bool(r.get("final_correct")), "method_ok": bool(r.get("method_ok")),
+            "feedback": str(r.get("feedback") or "")[:400], "photo": Path(photo).name}
 
 
 def dispute(task_id: str, idx: int, text: str) -> dict:
@@ -424,7 +452,7 @@ def _perk_mult(enc: dict) -> float:
     return min(mult, MAX_PERK_MULT)
 
 
-def _damage(enc: dict, prob: dict, correct: bool) -> tuple[float, float, bool, list[str]]:
+def _damage(enc: dict, prob: dict, correct: bool, work: dict | None = None) -> tuple[float, float, bool, list[str]]:
     """Returns (damage, base multiplier, crit, notes). All perk/affix maths lives here."""
     mods, notes = enc.get("mods", {}), []
     if not correct:
@@ -442,12 +470,20 @@ def _damage(enc: dict, prob: dict, correct: bool) -> tuple[float, float, bool, l
     if limit and time.time() - enc.get("q_started", time.time()) > limit:
         notes.append("⏳ Too slow: half damage")
         mult *= 0.5
+    if work and mult > 0:
+        if work["method_ok"]:
+            notes.append("📝 Method checked: +25% damage for showing correct working")
+            mult *= WORK_BONUS
+        else:
+            notes.append("📝 Right answer, but the method has a mistake: half damage (see the feedback)")
+            mult *= WORK_PENALTY
     crit = mult > 0 and enc["combo"] >= mods.get("crit_combo", CRIT_COMBO)
     dmg = 100.0 * mult * (CRIT_MULT if crit else 1.0) * _perk_mult(enc)
     return dmg, mult, crit, notes
 
 
-def _resolve(p: dict, enc: dict, prob: dict, text: str, correct: bool, feedback: str) -> dict:
+def _resolve(p: dict, enc: dict, prob: dict, text: str, correct: bool, feedback: str,
+             work: dict | None = None) -> dict:
     enc["tries"] += 1
     if not correct:
         enc["misses"] = enc.get("misses", 0) + 1
@@ -460,19 +496,24 @@ def _resolve(p: dict, enc: dict, prob: dict, text: str, correct: bool, feedback:
             note = " 🌬️ Second Wind: this retry is at full damage."
         return {"result": "miss", "feedback": (feedback or "Not quite. Try again or take a hint.") + note,
                 **_view(enc)}
+    if work and work["method_ok"] and correct:
+        p.setdefault("work_log", []).append({"at": store.now_iso(), "task_id": enc["task_id"], "photo": work["photo"]})
     clean = correct and enc["tries"] == 1 and enc["hint_level"] == 0
     enc["combo"] = enc["combo"] + 1 if clean else 0
-    dmg, mult, crit, notes = _damage(enc, prob, correct)
+    dmg, mult, crit, notes = _damage(enc, prob, correct, work)
     enc["damage"] += dmg
     enc["best_combo"] = max(enc["best_combo"], enc["combo"])
     enc["results"].append({"idx": enc["current"], "correct": correct, "tries": enc["tries"],
-                           "hints": enc["hint_level"], "damage": round(dmg), "answer": text[:300]})
+                           "hints": enc["hint_level"], "damage": round(dmg), "answer": text[:300],
+                           "work": {"method_ok": work["method_ok"], "photo": work["photo"]} if work else None})
     enc["last_fail"] = None if correct else {
         "idx": enc["current"], "paid_hints": max(0, enc["hint_level"] - enc.get("free_hints", 0))}
     events = []
     if correct and dmg > 0:  # no XP for copying the worked solution
         events = progress.add_xp(p, XP_HIT if mult >= FIRST_TRY else XP_HIT_LATE, "hit", enc["task_id"])
         events += rewards.on_hit(p, clean=clean, crit=crit, topic=_topic(enc))
+        if work and work["method_ok"]:
+            events += bounties.on_event(p, "show_work")
     reveal = {"answer": _answer_text(prob), "explain": prob["explain"],
               "solution": "" if clean else (prob["hints"][-1] if prob["hints"] else ""),
               "alt": [str(a) for a in prob.get("alt_answers", [])]}

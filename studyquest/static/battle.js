@@ -116,6 +116,12 @@ function problemHtml(p) {
       ${p.unverified ? `<p class="muted small">⚠ Two graders disagreed on this key, so either answer counts.</p>` : ""}
       <div id="hints"></div>
       ${input}
+      ${p.type !== "mcq" ? `<div class="work">
+        <label class="btn" for="work-photo">📷 Photo of your working</label>
+        <input type="file" id="work-photo" accept="image/*" capture="environment" hidden>
+        <span class="muted small" id="work-name">${B.photo?.idx === p.idx ? esc(B.photo.file.name) : "Optional: correct method = +25% damage, like the real exam. You can also paste an image."}</span>
+        <img id="work-preview" alt="" ${B.photo?.idx === p.idx ? "" : "hidden"}>
+      </div>` : ""}
       <div class="row spread">
         <span>${p.type !== "mcq" ? `<button class="btn primary big" id="attack">Attack ⏎</button>` : ""}</span>
         <span>${B.data.rules?.no_hints ? `<span class="muted small">💎 Glass Cannon: no hints</span>` : `<button class="btn" id="hint-btn">💡 Hint <span class="muted small">(${p.hints_available - B.data.hint_level} left${B.data.rules?.free_hints ? ", next free" : ""})</span></button>`}</span>
@@ -130,8 +136,19 @@ function problemHtml(p) {
       </div></details>
     </div>`;
 }
+function attachPhoto(p, file) {
+  if (!file || !file.type.startsWith("image/")) return toast("That's not an image");
+  if (file.size > 12 * 1024 * 1024) return toast("Photo is over 12 MB");
+  B.photo = { idx: p.idx, file };
+  $("#work-name").textContent = `📎 ${file.name || "pasted image"}: attached. Attack to send it.`;
+  const img = $("#work-preview"); img.hidden = false; img.src = URL.createObjectURL(file);
+}
 function bindProblem(p) {
   if (!p) return;
+  if ($("#work-photo")) {
+    $("#work-photo").onchange = (e) => attachPhoto(p, e.target.files[0]);
+    if (B.photo?.idx === p.idx) { const img = $("#work-preview"); img.src = URL.createObjectURL(B.photo.file); }
+  }
   const ans = $("#ans");
   if (ans) { ans.focus(); ans.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitAnswer(ans.value); } }; }
   if ($("#attack")) $("#attack").onclick = () => submitAnswer(ans.value);
@@ -159,12 +176,23 @@ document.addEventListener("keydown", (e) => {
 });
 
 async function submitAnswer(text) {
-  if (B.busy || !String(text).trim()) return;
-  B.busy = true;
   const p = B.data.problem;
-  const fx = $("#fx"); if (p.type === "short") fx.innerHTML = `<p class="muted">The judge is reading your answer…</p>`;
+  const photo = B.photo?.idx === p.idx ? B.photo.file : null;
+  if (B.busy || (!String(text).trim() && !photo)) return;
+  B.busy = true;
+  const fx = $("#fx");
+  if (photo) fx.innerHTML = `<p class="muted">🧙 Vex is reading your working… (about 15 s)</p>`;
+  else if (p.type === "short") fx.innerHTML = `<p class="muted">The judge is reading your answer…</p>`;
   try {
-    const r = await api("/api/battle/answer", { json: { task_id: B.data.task.id, idx: p.idx, answer: String(text) } });
+    let r;
+    if (photo) {
+      const fd = new FormData();
+      fd.append("task_id", B.data.task.id); fd.append("idx", p.idx); fd.append("answer", String(text || "")); fd.append("photo", photo, photo.name || "working.png");
+      r = await api("/api/battle/answer_photo", { method: "POST", body: fd });
+      if (r.result !== "unreadable") B.photo = null;
+    } else {
+      r = await api("/api/battle/answer", { json: { task_id: B.data.task.id, idx: p.idx, answer: String(text) } });
+    }
     B.lastAnswer = String(text);
     if (r.result === "unreadable") {
       fx.innerHTML = `<div class="helpbox" role="alert">${esc(r.feedback)}</div>`;
@@ -207,7 +235,8 @@ function handleHit(r, p) {
   // show the result on the finished problem, then move on
   app.querySelector(".problem").innerHTML = `<div class="prompt">${esc(p.prompt)}</div>
     <div class="hit-banner ${r.result}">${r.result === "hit" ? (r.crit ? `💥 CRITICAL! −${r.damage}` : `⚔️ Hit! −${r.damage}`) : "💨 Missed"}</div>
-    ${(r.notes || []).map((n) => `<p class="muted">${esc(n)}</p>`).join("")}${reveal}<div class="row">${next}</div><div id="fx"></div>`;
+    ${(r.notes || []).map((n) => `<p class="muted">${esc(n)}</p>`).join("")}
+    ${r.feedback ? `<div class="helpbox">📝 ${esc(r.feedback)}</div>` : ""}${reveal}<div class="row">${next}</div><div id="fx"></div>`;
   $(".enemy").outerHTML = enemyPanel(B.data, false);
   $("#exit-battle").onclick = () => { exitFocus(); S.phase = "card"; go("quest"); };
   if (r.result === "hit") { floatDamage(`−${r.damage}`, r.crit ? "crit" : "hit"); $("#monster").classList.add("shake"); }
@@ -306,6 +335,15 @@ setInterval(() => {
   const left = Math.round(B.data.timer - (Date.now() - B.qStart) / 1000);
   el.textContent = left > 0 ? `⏳ ${fmt(left)}` : "⏳ late: half damage"; el.classList.toggle("late", left <= 0);
 }, 500);
+
+// paste an image (screenshot / Continuity Camera) straight into the battle
+document.addEventListener("paste", (e) => {
+  if (S.phase !== "battle" || B.phase !== "problem" || B.answered || !$("#work-photo")) return;
+  const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith("image/"));
+  if (!item) return;
+  e.preventDefault();
+  attachPhoto(B.data.problem, item.getAsFile());
+});
 
 // ---------- in-app reader (no other tabs needed) ----------
 function openReader(pages, i) {

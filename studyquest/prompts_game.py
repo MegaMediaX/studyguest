@@ -65,6 +65,22 @@ Student: {json.dumps(answer, ensure_ascii=False)}
 Reply with JSON only: {{"score": 0.0-1.0, "feedback": "max 1 sentence, don't give the answer away if wrong"}}"""
 
 
+def judge_work(prob: dict, answer: str, photo: str) -> str:
+    typed = f"The student also typed this final answer: {json.dumps(answer, ensure_ascii=False)}." if answer.strip() \
+        else "The student typed no answer: read the final answer from the photo."
+    return f"""Check a student's handwritten working for one problem. Read the image file {photo}.
+Problem: {prob['prompt']}
+Answer key: {prob['answer']}  ({prob.get('explain', '')})
+{typed}
+Judge like an exam marker: is the final answer right (equivalent forms and rounding within 2% are fine), and is the
+method valid (right formula, steps follow, no lucky cancellation)? If anything is wrong, name the FIRST wrong step
+concretely ("line 3: you used v instead of the unit vector v/|v|"). NEVER state the correct final answer or
+the key's numbers in the feedback: the student may still retry. If there is no working at all, say what the first
+step should be about, not its result. If the photo is unreadable or not about this problem, set readable false.
+Reply with JSON only: {{"readable": true, "final_answer": "...", "final_correct": true, "method_ok": true,
+  "feedback": "max 2 sentences"}}"""
+
+
 def judge_dispute(prob: dict, answer: str) -> str:
     return f"""An auto-grader marked a student's answer wrong. Decide if the student is actually right
 (equivalent form, different but valid notation, rounding, or the answer key itself is wrong).

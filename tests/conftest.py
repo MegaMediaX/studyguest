@@ -27,6 +27,7 @@ class FakeAI:
         self.calls = []
         self.gemini_score = None  # set to force a Gemini disagreement
         self.key_answers = None   # Gemini's blind answers for keycheck
+        self.work = None          # what the marker "sees" in a photo of working
 
     def __call__(self, provider, prompt, images):
         self.calls.append((provider, prompt[:80]))
@@ -51,6 +52,12 @@ class FakeAI:
                  "explain": "x", "source": src2},
                 {"type": "numeric", "prompt": "broken key", "answer": "two and a half", "difficulty": 3,
                  "hints": ["h"], "explain": "x"}]})
+        if prompt.startswith("Check a student's handwritten working"):
+            assert images, "working must be sent as an image"
+            w = self.work or {}
+            return json.dumps({"readable": w.get("readable", True), "final_answer": w.get("final_answer", ""),
+                               "final_correct": w.get("final_correct", True), "method_ok": w.get("method_ok", True),
+                               "feedback": w.get("feedback", "Line 2: check the sign.")})
         if prompt.startswith("Solve each problem independently"):
             return json.dumps({"answers": self.key_answers or []})
         if prompt.startswith("Grade a one-line"):

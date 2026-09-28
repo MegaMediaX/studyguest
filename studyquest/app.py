@@ -7,8 +7,8 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import (ai, boss, bounties, checker, encounter, importer, progress, quest, review, rewards, run, sources,
-               store, world)
+from . import (ai, boss, bounties, checker, encounter, importer, photos, progress, quest, review, rewards, run,
+               sources, store, world)
 
 STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD = 12 * 1024 * 1024
@@ -126,7 +126,7 @@ async def _save_photo(photo: UploadFile | None) -> str | None:
     store.ensure_dirs()
     path = store.UPLOADS / f"{secrets.token_hex(6)}{ext}"
     path.write_bytes(data)
-    return str(path)
+    return str(photos.normalize(path))
 
 
 @app.post("/api/check/submit")
@@ -290,6 +290,15 @@ class BattleAnswer(BaseModel):
 @app.post("/api/battle/answer")
 def api_battle_answer(body: BattleAnswer):
     return encounter.answer(body.task_id, body.idx, body.answer)
+
+
+@app.post("/api/battle/answer_photo")
+async def api_battle_answer_photo(task_id: str = Form(..., max_length=40), idx: int = Form(..., ge=0, le=20),
+                                  answer: str = Form("", max_length=500), photo: UploadFile = File(...)):
+    path = await _save_photo(photo)
+    if not path:
+        raise HTTPException(400, "Attach a photo of your working.")
+    return encounter.answer(task_id, idx, answer, path)
 
 
 @app.post("/api/battle/dispute")

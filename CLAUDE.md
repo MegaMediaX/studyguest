@@ -61,6 +61,9 @@ it runs the app, answers the `/quest-*` commands, and tutors. Gemini (`agy -p`) 
    Rematches always get new problems (`encounter.variant_for`). Won tasks enter spaced review too
    (1/2/4 days, never past the day before the course exam). AI answer keys are cross-checked by Gemini
    (`keycheck.py`); disagreements accept either answer. Unreadable input never costs an attempt.
+   Photos of working (`/api/battle/answer_photo`, `photos.py` converts HEIC/shrinks via sips): Claude marks
+   final answer + method; valid method ×1.25, right answer with a wrong method ×0.5; feedback names the
+   first wrong step and must never reveal the answer.
    Hints cost damage, never XP. Loot is cosmetic; consumables only help practise (free hint, undo one miss).
    Rewards come from correctness and spacing only (see `docs/game-design.md` §5 guardrails). No shame copy.
 10. Everything happens in the app: problems, the source pages (reader), explanations. Don't send the user elsewhere.

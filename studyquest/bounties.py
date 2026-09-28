@@ -11,6 +11,7 @@ TEMPLATES = {
     "proof_win": {"text": "Defeat an enemy that demands proof", "n": 1, "reward": 2},
     "run_clear": {"text": "Clear every floor of a run", "n": 1, "reward": 3},
     "crits": {"text": "Land {n} critical hits", "n": 3, "reward": 1},
+    "show_work": {"text": "Show correct working on {n} problems (📷 photo)", "n": 2, "reward": 2},
 }
 
 
