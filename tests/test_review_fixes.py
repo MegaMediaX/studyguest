@@ -222,3 +222,14 @@ def test_run_skips_floors_already_cleared_elsewhere(client, imported):
     out = client.post("/api/battle/start", json={"task_id": first, "run_id": rid}).json()
     assert out["state"] == "already_done" and out["run"]["floor"] == 1
     assert client.get("/api/run").json()["run"]["floor"] == 1
+
+
+def test_rule_button_shows_formula_costs_ten_percent_keeps_combo(client, imported):
+    tid = _tid(imported)
+    v = client.post("/api/battle/start", json={"task_id": tid}).json()
+    r = client.post("/api/battle/rule", json={"task_id": tid, "idx": v["problem"]["idx"]}).json()
+    assert r["rule"] and r["cost"] == 0.1
+    hit = _ans(client, tid, v, RIGHT[v["problem"]["type"]])
+    assert hit["damage"] == 90 and hit["combo"] == 1
+    nxt = client.post("/api/battle/start", json={"task_id": tid}).json()
+    assert nxt["rule_used"] is False  # resets for the next problem

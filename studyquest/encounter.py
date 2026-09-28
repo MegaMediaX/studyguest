@@ -22,6 +22,7 @@ FIRST_TRY, SECOND_TRY = 1.0, 0.5
 HINT_COST = [0.0, 0.25, 0.5, 1.0]  # fraction of a problem's damage lost at hint level 0..3
 MAX_PERK_MULT = 1.5          # all perk multipliers combined can't exceed this
 CRIT_COMBO, CRIT_MULT = 3, 1.25
+RULE_COST = 0.1           # seeing the rule costs 10% of a problem's damage (a hint's nudge costs 25%)
 WORK_BONUS, WORK_PENALTY = 1.25, 0.5   # photo of working: valid method bonus / right answer, wrong method
 XP_HIT, XP_HIT_LATE = 2, 1
 XP_CHIMERA = 10
@@ -51,6 +52,7 @@ def _validate_problem(q: dict) -> dict | None:
         difficulty = 2
     base = {"type": kind, "prompt": str(q["prompt"]).strip(), "hints": hints,
             "explain": str(q.get("explain", "")), "answer": q.get("answer"), "difficulty": difficulty,
+            "rule": str(q.get("rule") or "")[:300],
             "source": q.get("source") if isinstance(q.get("source"), dict) else None}
     try:
         if kind == "mcq":
@@ -183,6 +185,7 @@ def _view(enc: dict, task: dict | None = None) -> dict:
             "elapsed": round(time.time() - enc.get("q_started", time.time())),
             "staggered": hp["now"] == 0 and cur is not None,
             "correct": _correct_count(enc), "need_correct": math.ceil(MIN_CORRECT * len(enc["problems"])),
+            "rule_used": bool(enc.get("rule_used")),
             "rules": {"no_hints": bool(enc.get("mods", {}).get("no_hints")),
                       "gambit": bool(enc.get("mods", {}).get("gambit")),
                       "free_hints": max(0, enc.get("free_hints", 0) - enc["hint_level"])},
@@ -463,6 +466,8 @@ def _damage(enc: dict, prob: dict, correct: bool, work: dict | None = None) -> t
     mult = (FIRST_TRY if enc["tries"] == 1 else SECOND_TRY) * (1 - HINT_COST[min(paid_hints, 3)])
     if last_hint_used:
         notes.append("📖 You used the worked solution: no damage, but now you've seen how it's done")
+    if enc.get("rule_used"):
+        mult *= 1 - RULE_COST
     if enc.get("affix") == "armored" and (enc["tries"] > 1 or enc["hint_level"] > 0):
         notes.append("🛡️ Blocked: armored enemies only take clean hits")
         mult = 0.0
@@ -543,7 +548,7 @@ def _answer_text(prob: dict) -> str:
 
 def _advance(enc: dict) -> None:
     """Adaptive order: on a combo take the hardest left, after a miss the easiest; proofs come last."""
-    enc["tries"], enc["hint_level"], enc["q_started"] = 0, 0, time.time()
+    enc["tries"], enc["hint_level"], enc["q_started"], enc["rule_used"] = 0, 0, time.time(), False
     enc["free_hints"] = 1 if enc.get("mods", {}).get("first_hint_free") else 0
     if not enc["queue"]:
         enc["current"] = None
@@ -571,6 +576,27 @@ def hint(task_id: str, idx: int) -> dict:
         progress.set_last(p, enc["task_id"], f"Hint on {enc['enemy']}: {prob['hints'][enc['hint_level'] - 1][:120]}")
         return {"hint_level": enc["hint_level"], "hint": prob["hints"][enc["hint_level"] - 1], "last": last,
                 "free": not last and enc["hint_level"] <= enc.get("free_hints", 0)}
+
+
+def rule(task_id: str, idx: int) -> dict:
+    """The general rule/formula for the current problem (not the steps). Costs RULE_COST, keeps the combo."""
+    enc = _active(progress.load(), task_id)
+    if enc["current"] != idx:
+        raise KeyError("That problem is already finished.")
+    if enc.get("mods", {}).get("no_hints"):
+        raise ValueError("💎 Glass Cannon: no hints or rules this run.")
+    prob = enc["problems"][idx]
+    text = prob.get("rule") or str(ai.ask("claude", prompts_game.rule_for(prob)).get("rule", ""))[:300]
+    if not text:
+        raise ai.AIUnavailable("Couldn't find the rule for this one; try a hint instead.")
+    with progress.transaction() as p:
+        enc = _active(p, task_id)
+        if enc["current"] != idx:
+            raise KeyError("That problem is already finished.")
+        enc["problems"][idx]["rule"] = text
+        enc["rule_used"] = True
+        progress.set_last(p, task_id, f"Rule for {enc['enemy']}: {text[:120]}")
+    return {"rule": text, "cost": RULE_COST}
 
 
 def use_token(task_id: str, kind: str) -> dict:

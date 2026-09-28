@@ -316,6 +316,11 @@ def api_battle_hint(body: BattleRef):
     return encounter.hint(body.task_id, body.idx)
 
 
+@app.post("/api/battle/rule")
+def api_battle_rule(body: BattleRef):
+    return encounter.rule(body.task_id, body.idx)
+
+
 @app.post("/api/battle/focus")
 def api_battle_focus(body: BattleRef):
     encounter.focus_break(body.task_id)

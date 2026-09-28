@@ -58,6 +58,8 @@ class FakeAI:
             return json.dumps({"readable": w.get("readable", True), "final_answer": w.get("final_answer", ""),
                                "final_correct": w.get("final_correct", True), "method_ok": w.get("method_ok", True),
                                "feedback": w.get("feedback", "Line 2: check the sign.")})
+        if prompt.startswith("State the general rule"):
+            return json.dumps({"rule": "D_u f = ∇f · u (u a unit vector)"})
         if prompt.startswith("Solve each problem independently"):
             return json.dumps({"answers": self.key_answers or []})
         if prompt.startswith("Grade a one-line"):

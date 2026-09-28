@@ -124,7 +124,8 @@ function problemHtml(p) {
       </div>` : ""}
       <div class="row spread">
         <span>${p.type !== "mcq" ? `<button class="btn primary big" id="attack">Attack ⏎</button>` : ""}</span>
-        <span>${B.data.rules?.no_hints ? `<span class="muted small">💎 Glass Cannon: no hints</span>` : `<button class="btn" id="hint-btn">💡 Hint <span class="muted small">(${p.hints_available - B.data.hint_level} left${B.data.rules?.free_hints ? ", next free" : ""})</span></button>`}</span>
+        <span>${B.data.rules?.no_hints ? `<span class="muted small">💎 Glass Cannon: no hints</span>` : `<button class="btn" id="rule-btn" title="The formula or theorem to use, without the steps (−10% damage)">📐 Rule</button>
+          <button class="btn" id="hint-btn">💡 Hint <span class="muted small">(${p.hints_available - B.data.hint_level} left${B.data.rules?.free_hints ? ", next free" : ""})</span></button>`}</span>
       </div>
       <div id="fx"></div>
       <details class="more"><summary>More help</summary><div class="row">
@@ -154,6 +155,7 @@ function bindProblem(p) {
   if ($("#attack")) $("#attack").onclick = () => submitAnswer(ans.value);
   document.querySelectorAll(".choice").forEach((b) => (b.onclick = () => submitAnswer(b.dataset.i === undefined ? "" : String(+b.dataset.i + 1))));
   if ($("#hint-btn")) $("#hint-btn").onclick = () => takeHint(p);
+  if ($("#rule-btn")) $("#rule-btn").onclick = () => showRule(p);
   $("#scroll-link").onclick = () => { B.phase = "lesson"; markLesson(); renderBattle(); $("#fight").textContent = "⚔️ Back to the fight"; };
   for (const [id, kind] of [["#tok-retry", "retry_token"], ["#tok-hint", "hint_token"]]) {
     if ($(id)) $(id).onclick = async () => {
@@ -259,6 +261,15 @@ function bindDispute(p) {
   };
 }
 
+async function showRule(p) {
+  const btn = $("#rule-btn"); btn.disabled = true;
+  try {
+    const r = await api("/api/battle/rule", { json: { task_id: B.data.task.id, idx: p.idx } });
+    B.data.rule_used = true;
+    $("#hints").insertAdjacentHTML("beforeend", `<div class="helpbox rule"><b>📐 Rule to apply</b> <span class="muted small">(−10% damage)</span><p class="pre">${esc(r.rule)}</p></div>`);
+    btn.textContent = "📐 Rule shown";
+  } catch (e) { btn.disabled = false; showError(e, $(".battle")); }
+}
 async function takeHint(p) {
   try {
     const r = await api("/api/battle/hint", { json: { task_id: B.data.task.id, idx: p.idx } });
