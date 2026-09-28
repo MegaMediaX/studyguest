@@ -131,8 +131,11 @@ async function renderQuest() {
   G.run = runState.run;
   const runBtn = G.run ? `<button class="btn primary big" id="run">${G.run.offer?.length ? "🎁 Choose your perk" : `▶ Continue run · floor ${G.run.floor + 1}/${G.run.floors}`}</button>`
     : `<button class="btn primary big" id="run">▶ Start a run <span class="small">(up to 4 floors, perks, a chest)</span></button>`;
+  const mock = t.mock_today ? `<section class="card mock-day"><h2>📄 Mock exam day ${t.mock_today.number}/2</h2>
+      <p>Take the ${esc(t.mock_today.name)}: ${t.mock_today.minutes} minutes, closed book, full working on paper. It's the best predictor of Exam I.</p>
+      <div class="row"><button class="btn primary big" id="mock-go">Start the timed mock</button></div></section>` : "";
   app.innerHTML = `
-    ${riftBanner(t.rift)}
+    ${mock}${riftBanner(t.rift)}
     <section class="card" id="task-card">
       <p class="eyebrow">${t.label === "today" ? "Today's session" : "Next session"} · ${esc(s.date_label)} · ${esc(s.time)} · ${esc(s.subject)}</p>
       <h1 class="floor-title">${esc(s.session)}</h1>
@@ -149,6 +152,7 @@ async function renderQuest() {
       <div id="help"></div>
     </section>${bounty}`;
   bindBounties();
+  if ($("#mock-go")) $("#mock-go").onclick = () => renderBoss(t.mock_today.boss_id);
   $("#run").onclick = () => (G.run ? (G.run.offer?.length ? renderPerkDraft(G.run) : nextFloor()) : startRun());
   if ($("#abandon")) $("#abandon").onclick = async () => { const r = await api("/api/run/end", { method: "POST" }); renderRunSummary(r.run); };
   if (!LS.get(`greeted-${t.date}`, false)) { LS.set(`greeted-${t.date}`, true); vex("greet", $("#task-card"), true); }
@@ -405,7 +409,9 @@ function renderDeck(r) {
       ${c.rule ? `<button class="btn" id="deck-rule">📐 Rule</button>` : ""}</div><div id="fx"></div></section>`;
     const send = async (text) => {
       if (!String(text).trim()) return;
-      const res = await api("/api/review/problem", { json: { pid: c.id, answer: String(text) } });
+      let res;
+      try { res = await api("/api/review/problem", { json: { pid: c.id, answer: String(text) } }); }
+      catch (e) { $("#fx").innerHTML = `<div class="notice">Couldn't check that (${esc(e.message)}). Try again.</div>`; return; }
       if (res.result === "unreadable") { $("#fx").innerHTML = `<div class="helpbox">${esc(res.feedback)}</div>`; return; }
       celebrate(res.events || []);
       FX.play(res.result === "right" ? "hit" : "miss");
@@ -470,8 +476,8 @@ async function renderStats() {
         <div class="stat"><span class="muted">Sprints</span><b>${s.sprints}</b></div>
       </div></section>
       <section class="card"><h2>Exams</h2>${s.exams.map((e) => `<div class="exam"><span>${esc(e.name)}${e.room ? ` · ${esc(e.time)} ${esc(e.room)}` : ""}</span><b>${e.days === 0 ? "TODAY" : `${e.days} day${e.days === 1 ? "" : "s"}`}</b></div>`).join("")}</section>
-      <section class="card"><div class="row spread" style="margin-top:0"><h2 style="margin:0">Mastery${s.scope ? `: ${esc(s.scope.exam)} scope` : ""}</h2>
-        ${s.scope ? `<button class="btn link small" id="show-all">Show everything</button>` : ""}</div>
+      <section class="card"><div class="row spread" style="margin-top:0"><h2 style="margin:0">Mastery${s.scope && !S.showAll ? `: ${esc(s.scope.exam)} scope` : ": all topics"}</h2>
+        ${s.scope ? `<button class="btn link small" id="show-all">${S.showAll ? "Show exam scope only" : "Show everything"}</button>` : ""}</div>
         <div class="heat">${s.mastery.filter((m) => !s.scope || S.showAll || s.scope.session_ids.includes(m.id)).map((m) => `<div class="heat-tile"><b>${esc((m.date || "").slice(5))}</b> ${esc(m.topic)}
         <span class="heat-pct">${Math.round(m.score * 100)}%</span><span class="heat-bar"><span style="width:${Math.round(m.score * 100)}%"></span></span></div>`).join("")}</div></section>
       <section class="card" id="inventory"><h2>Inventory</h2><p class="muted">Loading…</p></section>
@@ -512,11 +518,6 @@ function renderInventory(inv) {
     applyTheme(inv2.theme_colors[b.dataset.theme]); renderInventory(inv2);
   }));
 }
-
-// sticky elements sit under the real header height (it wraps on phones)
-function syncHeaderHeight() { document.documentElement.style.setProperty("--hdr", `${Math.ceil(document.querySelector("header").getBoundingClientRect().bottom)}px`); }
-window.addEventListener("resize", syncHeaderHeight);
-setTimeout(syncHeaderHeight, 0);
 
 function applyTheme(color) { if (color) document.documentElement.style.setProperty("--accent", color); }
 

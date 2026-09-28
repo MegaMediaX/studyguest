@@ -17,8 +17,8 @@ def _due(days: int, plan: dict | None = None, tid: str | None = None) -> str:
     today = store.today()
     due = today + timedelta(days=days)
     cap = _exam_cap(plan, tid) if plan and tid else None
-    if cap and today < cap < due:
-        due = cap
+    if cap and due > cap:
+        due = max(cap, today)
     return due.isoformat()
 
 
@@ -30,13 +30,18 @@ def _exam_cap(plan: dict, tid: str):
     except KeyError:
         return None
     course = course_for_subject(session["subject"])
-    exam = next((e for e in exams_countdown() if e["course"] == course and e["days"] >= 2), None)
-    return date.fromisoformat(exam["date"]) - timedelta(days=1) if exam else None
+    exam = next((e for e in exams_countdown() if e["course"] == course and e["days"] >= 1), None)
+    if not exam:
+        return None
+    exam_day = date.fromisoformat(exam["date"])
+    # aim for exam−2 so the eve stays light; never later than exam−1
+    return max(exam_day - timedelta(days=2), min(store.today(), exam_day - timedelta(days=1)))
 
 
-def schedule(p: dict, plan: dict, tid: str) -> list[dict]:
-    """A won task enters spaced review (box 0 → back tomorrow) unless it already has a card."""
-    if tid in p["review"]:
+def schedule(p: dict, plan: dict, tid: str, stars: int = 1) -> list[dict]:
+    """A shaky win (1★) enters spaced review; clean wins don't (their missed problems are in the deck anyway).
+    Keeps the daily review load realistic before the exam."""
+    if tid in p["review"] or stars >= 2:
         return []
     session, _ = progress.find_task(plan, tid)
     p["review"][tid] = {"box": 0, "due": _due(INTERVALS[0], plan, tid), "topic": session["session"],
@@ -165,6 +170,7 @@ def grade_quick_win(index: int, answer: str) -> dict:
 # ---------- per-problem deck: the exact problems you missed come back ----------
 
 PROBLEM_ROUND = 8
+DECK_DAILY = 10   # at most 10 deck cards a day, oldest due first; the rest wait (no review avalanche)
 
 
 def _pid(prob: dict) -> str:
@@ -191,15 +197,29 @@ def add_problem_card(p: dict, enc: dict, prob: dict) -> list[dict]:
 
 def due_problem_cards(p: dict) -> list[dict]:
     today = store.today().isoformat()
-    cards = [c for c in p.get("problem_cards", {}).values() if c["due"] <= today]
-    mixed = interleave([{**c, "task_id": c["id"]} for c in cards], seed=int(store.today().strftime("%Y%m%d")))
-    return mixed[:PROBLEM_ROUND]
+    done_today = sum(1 for e in p.get("log", []) if e["event"] == "deck_answer" and e["at"][:10] == today)
+    budget = max(0, DECK_DAILY - done_today)
+    cards = sorted((c for c in p.get("problem_cards", {}).values() if c["due"] <= today), key=lambda c: c["due"])
+    mixed = interleave([{**c, "task_id": c["id"]} for c in cards[:budget]],
+                       seed=int(store.today().strftime("%Y%m%d")))
+    return mixed[:min(PROBLEM_ROUND, budget)]
+
+
+def _order_for(c: dict) -> list[int]:
+    """Shuffle MCQ choices per showing (stable within a day and box) so position can't be memorised."""
+    n = len(c["problem"].get("choices") or [])
+    order = list(range(n))
+    random.Random(f"{c['id']}|{store.today().isoformat()}|{c['box']}").shuffle(order)
+    return order
 
 
 def public_card(c: dict) -> dict:
     q = c["problem"]
+    choices = q.get("choices")
+    if q["type"] == "mcq" and choices:
+        choices = [choices[i] for i in _order_for(c)]
     return {"id": c["id"], "topic": c["topic"], "box": c["box"], "type": q["type"], "prompt": q["prompt"],
-            "choices": q.get("choices"), "rule": q.get("rule") or ""}
+            "choices": choices, "rule": q.get("rule") or ""}
 
 
 def answer_problem_card(pid: str, text: str) -> dict:
@@ -209,6 +229,11 @@ def answer_problem_card(pid: str, text: str) -> dict:
     if not card:
         raise KeyError("That card isn't in your deck.")
     q = card["problem"]
+    if q["type"] == "mcq" and q.get("choices"):
+        pick = mathcheck._choice_index(str(text), q["choices"])
+        if pick is None:
+            return {"result": "unreadable", "feedback": "Pick A–D. (No attempt used.)"}
+        text = str(_order_for(card)[pick] + 1)  # shown position → original choice
     if q["type"] in keycheck.CHECKABLE:
         if not mathcheck.readable(q["type"], text, q.get("choices"), q["answer"]):
             return {"result": "unreadable", "feedback": "Couldn't read that. (No attempt used.)"}

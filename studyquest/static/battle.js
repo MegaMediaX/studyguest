@@ -3,7 +3,8 @@
 "use strict";
 
 const MONSTERS = ["👾", "🐉", "🦂", "👹", "🦑", "🤖", "🐙", "🧟", "🦖", "👻", "🕷️", "🐺"];
-const B = { data: null, phase: "lesson", busy: false, left: null };
+const B = { data: null, phase: "lesson", busy: false, left: null, photo: null, aids: {}, keep: null, shownKey: null };
+const pkey = (p) => `${B.data?.task?.id}:${p?.idx}`; // problem idx restarts at 0 in every battle
 
 function monsterFor(name) {
   let h = 0; for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
@@ -19,6 +20,7 @@ const FORMAT_HINT = {
 async function startBattle(task, mode = "task", runId = null) {
   enterFocus(); // must run inside the click's user gesture, before any await
   notePlay();
+  B.photo = null; B.aids = {}; B.keep = null; B.shownKey = null; B.battleStart = Date.now();
   S.phase = "battle";
   G.saidThisBattle = 0;
   loading(task.text ? `Summoning the enemy for “${task.text}”…` : "Descending to the next floor…");
@@ -73,7 +75,12 @@ function renderBattle(extra = "") {
   const body = B.phase === "lesson" ? lessonHtml(d) : problemHtml(d.problem);
   app.innerHTML = `<section class="card battle">${d.run_id && G.run ? runBar(G.run) : ""}${enemyPanel(d)}${d.notice ? `<div class="notice">${esc(d.notice)}</div>` : ""}${extra}${body}</section>`;
   $("#exit-battle").onclick = () => { exitFocus(); S.phase = "card"; go("quest"); };
-  if (B.phase === "lesson") bindLesson(d); else { bindProblem(d.problem); $(".battle").scrollIntoView({ block: "start" }); }
+  if (B.phase === "lesson") bindLesson(d);
+  else {
+    bindProblem(d.problem);
+    const k = d.problem ? pkey(d.problem) : null;
+    if (k !== B.shownKey) { B.shownKey = k; scrollToBattle(); }
+  }
   if (d.ghost && d.problem?.number === 1 && B.phase === "problem") toast(`👻 Your ghost from ${d.ghost.at.slice(5, 10)} is here. Beat it.`);
 }
 
@@ -91,6 +98,11 @@ function lessonHtml(d) {
     </div>
     <div class="row"><button class="btn primary big" id="fight">⚔️ Fight!</button></div>`;
 }
+function scrollToBattle() {
+  const card = $(".battle"); if (!card) return;
+  const hdr = document.querySelector("header").getBoundingClientRect().bottom;
+  window.scrollTo({ top: Math.max(0, card.getBoundingClientRect().top + window.scrollY - hdr - 8) });
+}
 function markLesson() {
   if (B.data?.task?.id) api("/api/battle/lesson", { json: { task_id: B.data.task.id } }).catch(() => {});
 }
@@ -102,32 +114,35 @@ function bindLesson(d) {
 // ---------- problem ----------
 function problemHtml(p) {
   if (!p) return "";
+  const key = pkey(p);
+  const kept = B.keep?.key === key ? B.keep.text : "";
   const input = p.type === "mcq"
     ? `<div class="choices">${p.choices.map((c, i) => `<button class="btn choice" data-i="${i}"><b>${"ABCDEF"[i]}</b> ${esc(c)}</button>`).join("")}</div>`
     : p.type === "short"
-      ? `<textarea id="ans" placeholder="${esc(FORMAT_HINT.short)}"></textarea>`
-      : `<input type="text" id="ans" autocomplete="off" spellcheck="false" aria-label="Your answer" aria-describedby="fmt">
+      ? `<textarea id="ans" aria-label="Your answer" placeholder="${esc(FORMAT_HINT.short)}">${esc(kept)}</textarea>`
+      : `<input type="text" id="ans" autocomplete="off" spellcheck="false" aria-label="Your answer" aria-describedby="fmt" value="${esc(kept)}">
          <p class="fmt" id="fmt">${esc(FORMAT_HINT[p.type])}</p>`;
-  const src = p.source ? `<button class="btn" id="src-link">📄 ${esc(p.source.file)} · ${esc(p.source.unit)} ${p.source.n}</button>` : "";
+  const src = p.source ? `<button class="btn" id="src-link">📄 ${esc(p.source.file)} · ${esc(p.source.unit)} ${esc(p.source.n)}</button>` : "";
+  const hasPhoto = B.photo?.key === key;
   return `<div class="problem">
       <p class="eyebrow">Problem ${p.number} of ${p.total} · difficulty ${"◆".repeat(p.difficulty)}${"◇".repeat(3 - p.difficulty)} ${B.data.tries ? "· 2nd try (half damage)" : ""}
         ${B.data.timer ? `· <span id="qtimer" class="qtimer"></span>` : ""}</p>
       <div class="prompt">${esc(p.prompt)}</div>
       ${p.unverified ? `<p class="muted small">⚠ Two graders disagreed on this key, so either answer counts (but it won't count toward ★★★ or seals).</p>` : ""}
       ${p.work_required ? `<p class="exam-style">📝 Exam-style: solve this on paper and send a photo of your working. Correct method = +25%.</p>` : ""}
-      <div id="hints"></div>
       ${input}
-      ${p.type !== "mcq" ? `<div class="work">
-        <label class="btn" for="work-photo">📷 Photo of your working</label>
-        <input type="file" id="work-photo" accept="image/*" capture="environment" hidden>
-        <span class="muted small" id="work-name">${B.photo?.idx === p.idx ? esc(B.photo.file.name) : p.work_required ? "Required here (or paste an image)." : "Optional: correct method = +25% damage, like the real exam. You can also paste an image."}</span>
-        <img id="work-preview" alt="" ${B.photo?.idx === p.idx ? "" : "hidden"}>
-      </div>` : ""}
       <div class="row spread">
         <span>${p.type !== "mcq" ? `<button class="btn primary big" id="attack">Attack ⏎</button>` : ""}</span>
-        <span>${B.data.rules?.no_hints ? `<span class="muted small">💎 Glass Cannon: no hints</span>` : `<button class="btn" id="rule-btn" title="The formula or theorem to use, without the steps (−10% damage)">📐 Rule</button>
+        <span>${B.data.rules?.no_hints ? `<span class="muted small">💎 Glass Cannon: no hints</span>` : `<button class="btn" id="rule-btn" title="The formula or theorem to use, without the steps (−25% damage)" ${B.data.rule_used ? "disabled" : ""}>${B.data.rule_used ? "📐 Rule shown" : "📐 Rule"}</button>
           <button class="btn" id="hint-btn">💡 Hint <span class="muted small">(${p.hints_available - B.data.hint_level} left${B.data.rules?.free_hints ? ", next free" : ""})</span></button>`}</span>
       </div>
+      <div id="hints">${(B.aids[key] || []).join("")}</div>
+      ${p.type !== "mcq" ? `<div class="work">
+        <button type="button" class="btn" id="work-btn">📷 Photo of your working</button>
+        <input type="file" id="work-photo" accept="image/*" capture="environment" hidden aria-label="Photo of your working">
+        <span class="muted small" id="work-name">${hasPhoto ? esc(B.photo.file.name || "pasted image") : p.work_required ? "Required here (or paste an image)." : "Optional: correct method = +25% damage, like the real exam. You can also paste an image."}</span>
+        <img id="work-preview" alt="" ${hasPhoto ? "" : "hidden"}>
+      </div>` : ""}
       <div id="fx"></div>
       <details class="more"><summary>More help</summary><div class="row">
         <button class="btn" id="explain-btn">Explain differently</button>
@@ -138,10 +153,16 @@ function problemHtml(p) {
       </div></details>
     </div>`;
 }
+function addAid(p, html) {
+  const key = pkey(p);
+  (B.aids[key] = B.aids[key] || []).push(html);
+  $("#hints").insertAdjacentHTML("beforeend", html);
+  $("#ans")?.focus();
+}
 function attachPhoto(p, file) {
   if (!file || !file.type.startsWith("image/")) return toast("That's not an image");
   if (file.size > 12 * 1024 * 1024) return toast("Photo is over 12 MB");
-  B.photo = { idx: p.idx, file };
+  B.photo = { key: pkey(p), file };
   $("#work-name").textContent = `📎 ${file.name || "pasted image"}: attached. Attack to send it.`;
   const img = $("#work-preview"); img.hidden = false; img.src = URL.createObjectURL(file);
 }
@@ -149,14 +170,17 @@ function bindProblem(p) {
   if (!p) return;
   if ($("#work-photo")) {
     $("#work-photo").onchange = (e) => attachPhoto(p, e.target.files[0]);
-    if (B.photo?.idx === p.idx) { const img = $("#work-preview"); img.src = URL.createObjectURL(B.photo.file); }
+    $("#work-btn").onclick = () => $("#work-photo").click();
+    if (B.photo?.key === pkey(p)) { const img = $("#work-preview"); img.src = URL.createObjectURL(B.photo.file); }
   }
   const ans = $("#ans");
-  if (ans) { ans.focus(); ans.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitAnswer(ans.value); } }; }
+  if (ans) { ans.focus(); if (B.keep?.key === pkey(p)) ans.select(); ans.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitAnswer(ans.value); } }; }
   if ($("#attack")) $("#attack").onclick = () => submitAnswer(ans.value);
   document.querySelectorAll(".choice").forEach((b) => (b.onclick = () => submitAnswer(b.dataset.i === undefined ? "" : String(+b.dataset.i + 1))));
   if ($("#hint-btn")) $("#hint-btn").onclick = () => takeHint(p);
   if ($("#rule-btn")) $("#rule-btn").onclick = () => showRule(p);
+  // a rule already paid for (e.g. before a reload) is shown again at no extra cost
+  if (B.data.rule_used && !(B.aids[pkey(p)] || []).some((h) => h.includes("helpbox rule"))) showRule(p);
   $("#scroll-link").onclick = () => { B.phase = "lesson"; markLesson(); renderBattle(); $("#fight").textContent = "⚔️ Back to the fight"; };
   for (const [id, kind] of [["#tok-retry", "retry_token"], ["#tok-hint", "hint_token"]]) {
     if ($(id)) $(id).onclick = async () => {
@@ -180,7 +204,7 @@ document.addEventListener("keydown", (e) => {
 
 async function submitAnswer(text, noWork = false) {
   const p = B.data.problem;
-  const photo = B.photo?.idx === p.idx ? B.photo.file : null;
+  const photo = B.photo?.key === pkey(p) ? B.photo.file : null;
   if (B.busy || (!String(text).trim() && !photo)) return;
   B.busy = true;
   const fx = $("#fx");
@@ -200,7 +224,7 @@ async function submitAnswer(text, noWork = false) {
       fx.innerHTML = `<div class="helpbox" role="alert">${esc(r.feedback)}
         <div class="row"><label class="btn primary" for="work-photo">📷 Attach photo</label>
         <button class="btn" id="no-work">Send without working (half damage)</button></div></div>`;
-      $("#no-work").onclick = () => { B.busy = false; submitAnswer(text, true); };
+      $("#no-work").onclick = () => submitAnswer(text, true);
       fx.scrollIntoView({ block: "nearest" });
       return;
     }
@@ -225,13 +249,15 @@ function handleHit(r, p) {
   B.data = { ...prev, ...r, task: prev.task, lesson: prev.lesson, pages: prev.pages };
   if (r.result === "miss") {
     FX.play("parry");
+    B.keep = { key: pkey(p), text: B.lastAnswer || "" };
     renderBattle();
     floatDamage("🛡 PARRY", "parry"); $("#monster")?.classList.add("strike"); FX.screenShake();
     $(".battle")?.classList.add("hurt"); setTimeout(() => $(".battle")?.classList.remove("hurt"), 400);
     if (r.misses >= 3) vex("three_misses", $(".battle"));
     $("#fx").innerHTML = `<div class="helpbox" role="alert">${esc(r.feedback)}</div>${disputeBtn()}`;
     bindDispute(p);
-    $("#fx").scrollIntoView({ block: "nearest" });
+    scrollToBattle(); // keep the enemy's reaction in view…
+    if ($("#fx").getBoundingClientRect().bottom > innerHeight) toast(r.feedback); // …and the feedback readable
     return;
   }
   B.answered = true;
@@ -251,6 +277,7 @@ function handleHit(r, p) {
     ${r.feedback ? `<div class="helpbox">📝 ${esc(r.feedback)}</div>` : ""}${reveal}<div class="row">${next}</div><div id="fx"></div>`;
   $(".enemy").outerHTML = enemyPanel(B.data, false);
   $("#exit-battle").onclick = () => { exitFocus(); S.phase = "card"; go("quest"); };
+  scrollToBattle();
   if (r.result === "hit") { floatDamage(`−${r.damage}`, r.crit ? "crit" : "hit"); $("#monster").classList.add("shake"); }
   if (r.crit && !B.critSaid) { B.critSaid = true; vex("first_crit", $(".battle")); }
   if (r.result === "fail") bindDispute(p);
@@ -272,13 +299,13 @@ function bindDispute(p) {
 }
 
 async function showRule(p) {
-  const btn = $("#rule-btn"); btn.disabled = true;
+  const btn = $("#rule-btn"); if (btn) btn.disabled = true;
   try {
     const r = await api("/api/battle/rule", { json: { task_id: B.data.task.id, idx: p.idx } });
     B.data.rule_used = true;
-    $("#hints").insertAdjacentHTML("beforeend", `<div class="helpbox rule"><b>📐 Rule to apply</b> <span class="muted small">(−10% damage)</span><p class="pre">${esc(r.rule)}</p></div>`);
-    btn.textContent = "📐 Rule shown";
-  } catch (e) { btn.disabled = false; showError(e, $(".battle")); }
+    addAid(p, `<div class="helpbox rule"><b>📐 Rule to apply</b> <span class="muted small">(−25% damage)</span><p class="pre">${esc(r.rule)}</p></div>`);
+    if (btn) btn.textContent = "📐 Rule shown";
+  } catch (e) { if (btn) btn.disabled = false; showError(e, $(".battle")); }
 }
 async function takeHint(p) {
   try {
@@ -286,8 +313,8 @@ async function takeHint(p) {
     if (!r.hint) return toast("No more hints");
     vex("hint_used", $(".battle"));
     B.data.hint_level = r.hint_level; B.data.combo = 0;
-    const label = r.free ? "Free hint" : ["", "Nudge (−25% dmg)", "Next step (−50% dmg)", "Worked solution (0 dmg, but you'll learn it)"][r.hint_level];
-    $("#hints").insertAdjacentHTML("beforeend", `<div class="helpbox"><b>💡 ${label}</b><p class="pre">${esc(r.hint)}</p></div>`);
+    const label = r.free ? "Free hint" : ["", "Nudge (−25% dmg)", "Next step (−50% dmg)", "Worked solution (doesn't count toward the win, but now you've seen it)"][r.hint_level];
+    addAid(p, `<div class="helpbox"><b>💡 ${label}</b><p class="pre">${esc(r.hint)}</p></div>`);
     $("#hint-btn").innerHTML = `💡 Hint <span class="muted small">(${p.hints_available - r.hint_level} left)</span>`;
   } catch (e) { showError(e, $(".battle")); }
 }
@@ -295,13 +322,15 @@ async function explainDifferently(p) {
   $("#hints").insertAdjacentHTML("beforeend", `<div class="helpbox muted" id="exp-wait">Asking for another angle…</div>`);
   try {
     const r = await api("/api/help/explain", { json: { task_id: B.data.task.id } });
-    $("#exp-wait").outerHTML = `<div class="helpbox">💡 <span class="muted">(${esc(r.by)})</span> ${esc(r.text)}</div>`;
+    $("#exp-wait").remove();
+    addAid(p, `<div class="helpbox">💡 <span class="muted">(${esc(r.by)})</span> ${esc(r.text)}</div>`);
   } catch (e) { $("#exp-wait").remove(); showError(e, $(".battle")); }
 }
 
 // ---------- outcome ----------
 function renderOutcome(r) {
   exitFocus();
+  LS.set("activeMs", LS.get("activeMs", 0) + (Date.now() - (B.battleStart || Date.now())));
   S.phase = "card";
   const d = B.data;
   if (r.outcome === "won") {
@@ -322,8 +351,12 @@ function renderOutcome(r) {
       </section>`;
     FX.play("kill");
     vex("win", $(".victory"));
-    document.querySelectorAll("[data-equip-title]").forEach((b) => (b.onclick = async () => { await api("/api/equip", { json: { title: b.dataset.equipTitle } }); loadToday(); b.outerHTML = "✓ worn"; }));
-    document.querySelectorAll("[data-equip-theme]").forEach((b) => (b.onclick = async () => { const inv = await api("/api/equip", { json: { theme: b.dataset.equipTheme } }); applyTheme(inv.theme_colors[b.dataset.equipTheme]); b.outerHTML = "✓ in use"; }));
+    document.querySelectorAll("[data-equip-title]").forEach((b) => (b.onclick = async () => {
+      try { await api("/api/equip", { json: { title: b.dataset.equipTitle } }); loadToday(); b.outerHTML = "✓ worn"; } catch (e) { toast(e.message); }
+    }));
+    document.querySelectorAll("[data-equip-theme]").forEach((b) => (b.onclick = async () => {
+      try { const inv = await api("/api/equip", { json: { theme: b.dataset.equipTheme } }); applyTheme(inv.theme_colors[b.dataset.equipTheme]); b.outerHTML = "✓ in use"; } catch (e) { toast(e.message); }
+    }));
   } else {
     app.innerHTML = `<section class="card center">
         <div class="monster">${monsterFor(d.enemy)}💨</div>
@@ -339,9 +372,7 @@ function renderOutcome(r) {
     S.taskIndex = null; B.critSaid = false; B.prevPct = null;
     if (r.run?.state === "done") renderRunSummary(r.run);
     else if (r.run?.offer?.length) renderPerkDraft(r.run);
-    else go(S.view === "review" ? "review" : "quest");
-    maybeCampfire(); // only after you've seen your reward
-    maybeLongSession();
+    else { go(S.view === "review" ? "review" : "quest"); maybeLongSession() || maybeCampfire(); }
   };
   $("#next").focus();
 }
@@ -382,8 +413,9 @@ function openReader(pages, i) {
     try {
       const q = `course=${encodeURIComponent(pg.course)}&file=${encodeURIComponent(pg.file)}&n=${pg.n}`;
       const meta = await api(`/api/source?${q}`);
-      box.innerHTML = meta.image ? `<img src="/api/source/img?${q}" alt="${esc(meta.file)} ${esc(meta.unit)} ${meta.n}" onload="B.applyZoom && B.applyZoom()">`
+      box.innerHTML = meta.image ? `<img src="/api/source/img?${q}" alt="${esc(meta.file)} ${esc(meta.unit)} ${esc(meta.n)}">`
         : `<pre class="pre">${esc(meta.text || "(no text on this page)")}</pre>`;
+      const img = $("#reader .reader-body img"); if (img) img.onload = () => B.applyZoom && B.applyZoom();
       $("#reader .reader-title").textContent = `${meta.file} · ${meta.unit} ${meta.n} (${k + 1}/${pages.length})`;
     } catch (e) { box.innerHTML = `<p class="notice">${esc(e.message)}</p>`; }
     $("#reader .prev").disabled = k === 0; $("#reader .next").disabled = k === pages.length - 1;
@@ -397,7 +429,7 @@ function openReader(pages, i) {
       <div class="reader-body"></div></div>`);
   $("#reader .close").onclick = close;
   B.zoom = B.zoom || (innerWidth < 560 ? 2 : 1);
-  const applyZoom = () => { const img = $("#reader .reader-body img"); if (img) img.style.width = `${Math.round(B.zoom * Math.min(900, innerWidth - 36))}px`; };
+  const applyZoom = () => { const img = $("#reader .reader-body img"); if (img) { img.style.maxWidth = "none"; img.style.width = `${Math.round(B.zoom * Math.min(900, innerWidth - 36))}px`; } };
   $("#reader .zoom-in").onclick = () => { B.zoom = Math.min(4, B.zoom + 0.5); applyZoom(); };
   $("#reader .zoom-out").onclick = () => { B.zoom = Math.max(0.75, B.zoom - 0.5); applyZoom(); };
   B.applyZoom = applyZoom;
@@ -440,17 +472,18 @@ document.addEventListener("visibilitychange", () => {
 
 // ---------- campfire (optional break) ----------
 function maybeCampfire() {
-  const since = LS.get("lastBreak", Date.now());
-  if (!LS.get("lastBreak", null)) LS.set("lastBreak", Date.now());
-  if (Date.now() - since < S.settings.sprint_min * 60000) return;
+  // counts only minutes spent in battles since the last break (idle time doesn't count)
+  const active = LS.get("activeMs", 0);
+  if (active < S.settings.sprint_min * 60000) return false;
   setTimeout(() => {
-    if (S.phase === "battle" || $("#campfire")) return;
+    if (S.phase === "battle" || $("#campfire") || $("#longsession")) return;
     document.body.insertAdjacentHTML("beforeend", `<div id="campfire" class="overlay" role="dialog" aria-modal="true" aria-label="Break"><div class="card center">
         <div class="monster">🔥</div><h1>Campfire?</h1>
-        <p class="muted">You've been fighting for ${Math.round((Date.now() - since) / 60000)} min. A ${S.settings.break_min}-min rest keeps you sharp.</p>
+        <p class="muted">You've been fighting for ${Math.round(active / 60000)} min. A ${S.settings.break_min}-min rest keeps you sharp.</p>
         <div class="row" style="justify-content:center"><button class="btn primary" id="rest">Rest ${S.settings.break_min} min</button><button class="btn" id="nah">Keep fighting</button></div></div></div>`);
-    $("#rest").focus();
-    $("#rest").onclick = () => { $("#campfire").remove(); LS.set("lastBreak", Date.now()); LS.set("break", { end: Date.now() + S.settings.break_min * 60000, minutes: S.settings.break_min }); renderBreak(); };
-    $("#nah").onclick = () => { $("#campfire").remove(); LS.set("lastBreak", Date.now() - S.settings.sprint_min * 30000); };
+    $("#nah").focus(); // Enter must not start a break by surprise
+    $("#rest").onclick = () => { $("#campfire").remove(); LS.set("activeMs", 0); LS.set("break", { end: Date.now() + S.settings.break_min * 60000, minutes: S.settings.break_min }); renderBreak(); };
+    $("#nah").onclick = () => { $("#campfire").remove(); LS.set("activeMs", Math.round(active / 2)); };
   }, 1500);
+  return true;
 }

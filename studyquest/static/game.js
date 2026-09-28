@@ -68,6 +68,7 @@ function runBar(run) {
   return `<div class="runbar"><span class="muted small">RUN</span>${pips}<span class="perks">${perksHtml}</span></div>`;
 }
 async function startRun() {
+  enterFocus(); // inside the click gesture, before any await
   try {
     const r = await api("/api/run/start", { method: "POST" });
     G.run = r.run; G.saidThisRun = 0;
@@ -92,6 +93,7 @@ function renderPerkDraft(run) {
     </section>`;
   vex("perk", $(".draft"), true);
   document.querySelectorAll("[data-perk]").forEach((b) => (b.onclick = async () => {
+    enterFocus();
     try { const r = await api("/api/run/perk", { json: { perk_id: b.dataset.perk } }); G.run = r.run; toast(`${b.querySelector(".perk-icon").textContent} ${b.querySelector("b").textContent}`); nextFloor(); }
     catch (e) { toast(e.message); }
   }));
@@ -150,8 +152,8 @@ async function openChest() {
 // Counts from your first battle of this sitting; shown only between battles, never mid-problem.
 function notePlay() { if (!G.playStarted) G.playStarted = Date.now(); }
 function maybeLongSession() {
-  if (!G.playStarted || Date.now() - G.playStarted < LONG_SESSION_MS || Date.now() - G.longWarnedAt < LONG_SESSION_MS) return;
-  if ($("#longsession")) return;
+  if (!G.playStarted || Date.now() - G.playStarted < LONG_SESSION_MS || Date.now() - G.longWarnedAt < LONG_SESSION_MS) return false;
+  if ($("#longsession") || $("#campfire")) return false;
   G.longWarnedAt = Date.now();
   document.body.insertAdjacentHTML("beforeend", `<div id="longsession" class="overlay" role="dialog" aria-modal="true" aria-label="Long session"><div class="card center"><div class="monster">🧙</div>
       <h1>Bank the win?</h1><p id="long-line" class="muted"></p>
@@ -166,4 +168,5 @@ function maybeLongSession() {
     app.innerHTML = `<section class="card center"><h1>See you tomorrow ⚔️</h1><p class="muted">Rest is when memory sets.</p></section>`;
   };
   $("#one-more").onclick = () => $("#longsession").remove();
+  return true;
 }

@@ -37,7 +37,7 @@ def start(p: dict, plan: dict, zone: str | None = None) -> dict:
     return _new_run(p, plan_queue(p, plan, session), session["id"], session["session"])
 
 
-MAX_REVIEWS = 2
+MAX_REVIEWS = 1   # one rematch per run keeps new material moving (review load stays realistic)
 
 
 def plan_queue(p: dict, plan: dict, session: dict | None = None) -> list[dict]:

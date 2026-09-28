@@ -132,6 +132,7 @@ function selectZone(id) {
   if ($("#zone-continue")) $("#zone-continue").onclick = () => { go("quest"); };
   if ($("#zone-endrun")) $("#zone-endrun").onclick = async () => { await api("/api/run/end", { method: "POST" }); G.run = null; selectZone(z.id); };
   if ($("#zone-run")) $("#zone-run").onclick = async () => {
+    enterFocus();
     try {
       const r = await api("/api/run/start", { json: { zone: z.id } });
       G.run = r.run; G.saidThisRun = 0; S.view = "quest";

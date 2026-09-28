@@ -46,16 +46,18 @@ def _validate_problem(q: dict) -> dict | None:
     if not isinstance(q, dict) or not str(q.get("prompt", "")).strip():
         return None
     kind = q.get("type", "short")
-    hints = [str(h) for h in (q.get("hints") or []) if str(h).strip()][:3]
+    raw_hints = q.get("hints") if isinstance(q.get("hints"), list) else []
+    raw_traps = q.get("traps") if isinstance(q.get("traps"), list) else []
+    hints = [str(h) for h in raw_hints if str(h).strip()][:3]
     try:
         difficulty = max(1, min(3, int(q.get("difficulty") or 2)))
     except (TypeError, ValueError):
         difficulty = 2
     base = {"type": kind, "prompt": str(q["prompt"]).strip(), "hints": hints,
             "explain": str(q.get("explain", "")), "answer": q.get("answer"), "difficulty": difficulty,
-            "rule": str(q.get("rule") or "")[:300],
+            "rule": str(q.get("rule") or "")[:300] if not isinstance(q.get("rule"), (dict, list)) else "",
             "traps": [{"answer": str(t.get("answer")), "why": str(t.get("why", ""))[:200]}
-                      for t in (q.get("traps") or []) if isinstance(t, dict) and t.get("why")][:2],
+                      for t in raw_traps if isinstance(t, dict) and t.get("why")][:2],
             "source": q.get("source") if isinstance(q.get("source"), dict) else None}
     try:
         if kind == "mcq":
@@ -168,7 +170,7 @@ def _order(problems: list[dict]) -> list[int]:
 def _public_problem(p: dict, idx: int, total: int) -> dict:
     out = {"idx": idx, "number": None, "total": total, "type": p["type"], "prompt": p["prompt"],
            "hints_available": len(p["hints"]), "difficulty": p["difficulty"], "source": p["source"],
-           "unverified": p.get("verified") is False, "from": p.get("from_topic"),
+           "unverified": p.get("verified") is False, "from": bool(p.get("from_topic")),
            "work_required": bool(p.get("work_required"))}
     if p["type"] == "mcq":
         out["choices"] = p["choices"]
@@ -176,7 +178,9 @@ def _public_problem(p: dict, idx: int, total: int) -> dict:
 
 
 def _correct_count(enc: dict) -> int:
-    return sum(1 for r in enc["results"] if r["correct"])
+    """Answers that count toward the win: right, not copied from the worked solution, and for multiple choice
+    right on the first try (a second pick of 4 is half guessing; the real exam gives one try)."""
+    return sum(1 for r in enc["results"] if r.get("solved", r["correct"]))
 
 
 def _view(enc: dict, task: dict | None = None) -> dict:
@@ -275,7 +279,9 @@ def start_chimera(key: str, run_id: str | None) -> dict:
 
 
 def chimera_problems(p: dict, plan: dict, run: dict) -> list[dict]:
-    """Up to CHIMERA_SIZE problems, one per earlier battle in the run's course, different topics first."""
+    """Up to CHIMERA_SIZE problems from different earlier topics in the run's course, chosen at random per run
+    (seeded by the run id) so every Chimera is different."""
+    import random
     from .importer import all_tasks
     course = None
     for q in run.get("queue", []):
@@ -283,16 +289,17 @@ def chimera_problems(p: dict, plan: dict, run: dict) -> list[dict]:
             s, _ = progress.find_task(plan, q["task_id"])
             course = course_for_subject(s["subject"])
             break
-    by_topic: dict[str, dict] = {}
+    rnd = random.Random(run.get("id") or "probe")
+    pools: dict[str, list[dict]] = {}
     for s, t in all_tasks(plan):
         enc = p.get("encounters", {}).get(t["id"])
-        if not enc or course_for_subject(s["subject"]) != course or s["session"] in by_topic:
+        if not enc or course_for_subject(s["subject"]) != course:
             continue
-        candidates = [q for q in enc.get("problems", []) if not q.get("proof")]
-        if candidates:
-            pick = max(candidates, key=lambda q: q["difficulty"])
-            by_topic[s["session"]] = {**pick, "from_topic": s["session"]}
-    return list(by_topic.values())[:CHIMERA_SIZE]
+        pools.setdefault(s["session"], []).extend(
+            {**q, "from_topic": s["session"]} for q in enc.get("problems", []) if not q.get("proof"))
+    topics = [t for t, qs in pools.items() if qs]
+    rnd.shuffle(topics)
+    return [rnd.choice(pools[t]) for t in topics[:CHIMERA_SIZE]]
 
 
 def _run_setup(p: dict, run_id: str | None, task_id: str) -> tuple[dict, str | None, bool]:
@@ -327,7 +334,7 @@ def _intent(enc: dict) -> dict | None:
     if prob.get("proof"):
         return {"icon": "📜", "text": "Demands proof: explain why, in your own words"}
     if prob.get("from_topic"):
-        return {"icon": "🐲", "text": f"From: {prob['from_topic'][:40]}"}
+        return {"icon": "🐲", "text": "Mixed topic: first decide which idea this needs"}
     if enc.get("affix") == "armored":
         return {"icon": "🛡️", "text": "Armored: only clean first-try hits land"}
     if enc.get("affix") == "timed":
@@ -447,7 +454,9 @@ def _regrade_fail(p: dict, enc: dict, idx: int, reason: str) -> dict:
     dmg = 100.0 * SECOND_TRY * (1 - HINT_COST[min(last["paid_hints"], 3)]) * _perk_mult(enc)
     if last["paid_hints"] >= 3:
         dmg = 0.0
-    result.update(correct=True, damage=round(dmg))
+    prob = enc["problems"][idx]
+    result.update(correct=True, damage=round(dmg), solved=prob["type"] != "mcq" and last["paid_hints"] < 3)
+    p.get("problem_cards", {}).pop(review._pid(prob), None)  # the key was wrong, not you
     enc["damage"] += dmg
     events = progress.add_xp(p, XP_HIT_LATE, "dispute upheld", enc["task_id"]) if dmg > 0 else []
     return {"result": "hit", "damage": round(dmg), "crit": False, "feedback": reason, "reveal": None,
@@ -522,7 +531,9 @@ def _resolve(p: dict, enc: dict, prob: dict, text: str, correct: bool, feedback:
                 **_view(enc)}
     if work and work.get("method_ok") and correct:
         p.setdefault("work_log", []).append({"at": store.now_iso(), "task_id": enc["task_id"], "photo": work["photo"]})
-    clean = correct and enc["tries"] == 1 and enc["hint_level"] == 0
+    clean = correct and enc["tries"] == 1 and enc["hint_level"] == 0 and not (work and work.get("none"))
+    last_hint_used = bool(prob["hints"]) and enc["hint_level"] >= len(prob["hints"])
+    solved = correct and not last_hint_used and not (prob["type"] == "mcq" and enc["tries"] > 1)
     enc["combo"] = enc["combo"] + 1 if clean else 0
     dmg, mult, crit, notes = _damage(enc, prob, correct, work)
     enc["damage"] += dmg
@@ -530,7 +541,7 @@ def _resolve(p: dict, enc: dict, prob: dict, text: str, correct: bool, feedback:
     enc["results"].append({"idx": enc["current"], "correct": correct, "tries": enc["tries"],
                            "hints": enc["hint_level"], "damage": round(dmg), "answer": text[:300],
                            "work": {"method_ok": work["method_ok"], "photo": work.get("photo")} if work else None,
-                           "via_alt": via_alt})
+                           "via_alt": via_alt, "solved": solved})
     if not clean:
         events_card = review.add_problem_card(p, enc, prob)  # the exact problem comes back later
     else:
@@ -703,7 +714,7 @@ def _finish(p: dict, enc: dict) -> dict:
             events = review.on_pass(p, plan, tid)  # keeps the Leitner card moving up
         else:
             events = progress.record_pass(p, plan, tid, first_try=enc["attempt"] == 1)
-            events += review.schedule(p, plan, tid)  # wins get spaced review too
+            events += review.schedule(p, plan, tid, stars=_stars(enc))  # shaky wins get spaced review too
         if any(r.get("via_alt") for r in enc["results"]):
             p.setdefault("unverified_wins", [])
             if tid not in p["unverified_wins"]:

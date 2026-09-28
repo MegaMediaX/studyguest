@@ -48,7 +48,20 @@ def today_quest(p: dict, plan: dict) -> dict:
         "backlog": {"sessions": len(backlog), "tasks": sum(len(progress.session_left(p, s)) for s in backlog)},
         "review_due": len(review.due_cards(p)),
         "rift": rift(p, plan, current),
+        "mock_today": mock_today(p),
     }
+
+
+def mock_today(p: dict) -> dict | None:
+    """On a planned mock date (and not yet taken today), invite the timed paper mock."""
+    today = store.today().isoformat()
+    for b in store.load_config().get("bosses", []):
+        if today in b.get("unlock_on", []):
+            taken = any(h["at"][:10] == today for h in p.get("bosses", {}).get(b["id"], {}).get("history", []))
+            if not taken:
+                n = b["unlock_on"].index(today) + 1
+                return {"boss_id": b["id"], "name": b["name"], "minutes": b["minutes"], "number": n}
+    return None
 
 
 def rift(p: dict, plan: dict, session: dict | None) -> dict | None:
