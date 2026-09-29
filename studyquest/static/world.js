@@ -23,7 +23,7 @@ async function renderWorld() {
       ${regionRift(region)}
       ${innerWidth < 560 ? zoneList(region, here) : `<section class="card map-card"><svg class="worldmap" viewBox="0 0 820 400" role="img" aria-label="${esc(region.region)} map">${mapSvg(region, here)}</svg></section>`}
       <div id="zone-panel"></div>
-      ${W.data.bosses.map((b) => `<section class="card"><h2>👹 ${esc(b.name)} ${b.beaten ? "· beaten ✅" : ""}</h2>
+      ${W.data.bosses.filter((b) => b.course === W.region).map((b) => `<section class="card"><h2>👹 ${esc(b.name)} ${b.beaten ? "· beaten ✅" : ""}</h2>
         <p class="muted">${b.minutes}-min timed ${b.paper ? "paper " : ""}mock from past exams. ${b.unlocked ? "Unlocked: do it in one sitting." : `Unlocks ${b.mock_dates?.length ? `on ${esc(b.mock_dates[0])} (or earlier` : "(after"} “${esc(b.unlock_after)}”)${b.mock_dates?.length ? "" : ""}.`}${b.best != null ? ` Best: ${Math.round(b.best * 100)}%` : ""}</p>
         <button class="btn ${b.unlocked ? "primary" : ""}" data-boss="${esc(b.id)}" ${b.unlocked ? "" : "disabled"}>Fight</button></section>`).join("")}
       <button class="btn link" id="full">Show full plan</button><div id="fullplan"></div>`;

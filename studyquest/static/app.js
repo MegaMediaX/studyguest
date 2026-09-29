@@ -21,6 +21,25 @@ async function api(path, opts = {}) {
   if (!res.ok) throw Object.assign(new Error(data.error || data.detail || res.statusText), { data, status: res.status });
   return data;
 }
+// Math as a student reads it: code-style keys (x**2, exp(x), log(t), 2*x*y, f_xx) → x², eˣ-style, ln, 2xy, subscripts.
+// Always escapes first, so it's safe to put the result into innerHTML.
+function mathHtml(text) {
+  let s = esc(text);
+  s = s.replace(/\bexp\(/g, "e^(").replace(/\blog\(/g, "ln(").replace(/\bsqrt\(/g, "√(").replace(/\bpi\b/g, "π")
+    .replace(/\btheta\b/g, "θ").replace(/\bphi\b/g, "φ").replace(/\brho\b/g, "ρ").replace(/\blam\b/g, "λ");
+  s = s.replace(/\*\*/g, "^");
+  s = s.replace(/\^\{([^{}]{1,12})\}/g, "<sup>$1</sup>")                 // e^{xy}
+    .replace(/\^\(([^()]{1,14})\)/g, "<sup>$1</sup>")                     // e^(x*y)
+    .replace(/\^(-?[0-9a-zA-Zθφ]{1,3})/g, "<sup>$1</sup>");                // x^2, e^x
+  s = s.replace(/(\d)\*(?=[a-zA-Zα-ωθφρλπ√(])/g, "$1")                      // 2*x -> 2x
+    .replace(/(?<![a-zA-Z])([a-zA-Z])\*(?=[a-zA-Z](?![a-zA-Z(]))/g, "$1")       // x*y -> xy (single letters)
+    .replace(/([a-zA-Z)])\*(?=[a-zA-Z(√])/g, "$1·")                           // cos(x)*y -> cos(x)·y
+    .replace(/\*/g, "·");
+  s = s.replace(/\b([a-zA-Z∇])_\{?([a-zA-Z0-9]{1,3})\}?/g, "$1<sub>$2</sub>")  // f_xx, W_xy
+    .replace(/\)_([a-zA-Z0-9]{1,3})\b/g, ")<sub>$1</sub>");                       // (f_x)_x
+  s = s.replace(/\b(?:choice |option )?index ([0-5])\b/gi, (_, i) => `choice ${"ABCDEF"[+i]}`);
+  return s;
+}
 function fmt(sec) { sec = Math.max(0, Math.round(sec)); return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`; }
 function toast(msg) {
   const t = $("#toast"); t.textContent = msg; t.classList.remove("hidden");
@@ -45,7 +64,17 @@ function showError(e, where = app) {
   const box = document.createElement("div"); box.className = "notice"; box.textContent = msg;
   where.prepend(box);
 }
-function loading(text) { app.innerHTML = `<section class="card center"><p class="muted">${esc(text)}</p></section>`; }
+function loading(text) {
+  app.innerHTML = `<section class="card center"><p class="muted">${esc(text)}</p><p class="muted small" id="load-timer"></p></section>`;
+  const t0 = Date.now();
+  clearInterval(loading._t);
+  loading._t = setInterval(() => {
+    const el = $("#load-timer"); if (!el) return clearInterval(loading._t);
+    const s = Math.round((Date.now() - t0) / 1000);
+    el.textContent = s < 5 ? "" : s < 90 ? `${s} s · a brand-new battle takes 30–90 s; later floors are ready instantly`
+      : `${s} s · still building (Claude + a second check of every answer key)`;
+  }, 1000);
+}
 
 // ---------- HUD & time bar ----------
 function renderHud(t) {
@@ -131,11 +160,16 @@ async function renderQuest() {
   G.run = runState.run;
   const runBtn = G.run ? `<button class="btn primary big" id="run">${G.run.offer?.length ? "🎁 Choose your perk" : `▶ Continue run · floor ${G.run.floor + 1}/${G.run.floors}`}</button>`
     : `<button class="btn primary big" id="run">▶ Start a run <span class="small">(up to 4 floors, perks, a chest)</span></button>`;
+  const ef = t.exam_focus;
+  const focus = ef && (s.subject && !/calc/i.test(s.subject) || ef.behind) ? `<section class="card exam-focus" role="region" aria-label="Exam focus">
+      <h2>📐 ${esc(ef.exam)} in ${esc(ef.days)} day${ef.days === 1 ? "" : "s"}</h2>
+      <p>${ef.behind ? `${esc(ef.behind)} tasks from earlier sessions are waiting. ` : ""}Next up: <b>${esc(ef.zone_name)}</b>.</p>
+      <div class="row"><button class="btn primary big" id="focus-go">▶ Start a ${esc(ef.course)} run</button></div></section>` : "";
   const mock = t.mock_today ? `<section class="card mock-day" role="region" aria-label="Mock exam reminder"><h2>📄 Mock exam day ${esc(t.mock_today.number)}/2</h2>
       <p>Take the ${esc(t.mock_today.name)}: ${esc(t.mock_today.minutes)} minutes, closed book, full working on paper. It's the best predictor of Exam I.</p>
       <div class="row"><button class="btn primary big" id="mock-go">Start the timed mock</button></div></section>` : "";
   app.innerHTML = `
-    ${mock}${riftBanner(t.rift)}
+    ${mock}${focus}${riftBanner(t.rift)}
     <section class="card" id="task-card">
       <p class="eyebrow">${t.label === "today" ? "Today's session" : "Next session"} · ${esc(s.date_label)} · ${esc(s.time)} · ${esc(s.subject)}</p>
       <h1 class="floor-title">${esc(s.session)}</h1>
@@ -153,6 +187,15 @@ async function renderQuest() {
     </section>${bounty}`;
   bindBounties();
   if ($("#mock-go")) $("#mock-go").onclick = () => renderBoss(t.mock_today.boss_id);
+  if ($("#focus-go")) $("#focus-go").onclick = async () => {
+    enterFocus();
+    try {
+      if (G.run && G.run.session !== ef.zone_name) { await api("/api/run/end", { method: "POST" }); G.run = null; }
+      const r = await api("/api/run/start", { json: { zone: ef.zone } });
+      G.run = r.run; G.saidThisRun = 0; FX.play("perk"); nextFloor();
+    } catch (e) { toast(e.message); }
+  };
+  if (ef) api(`/api/run/preview?zone=${encodeURIComponent(ef.zone)}`).then((r) => api("/api/battle/prefetch", { json: { task_ids: r.queue.slice(0, 4) } })).catch(() => {});
   $("#run").onclick = () => (G.run ? (G.run.offer?.length ? renderPerkDraft(G.run) : nextFloor()) : startRun());
   if ($("#abandon")) $("#abandon").onclick = async () => { const r = await api("/api/run/end", { method: "POST" }); renderRunSummary(r.run); };
   if (!LS.get(`greeted-${t.date}`, false)) { LS.set(`greeted-${t.date}`, true); vex("greet", $("#task-card"), true); }
@@ -404,7 +447,7 @@ function renderDeck(r) {
       ? `<div class="choices">${c.choices.map((x, k) => `<button class="btn choice" data-k="${(c.choice_ids ? c.choice_ids[k] : k) + 1}"><b>${"ABCDEF"[k]}</b> ${esc(x)}</button>`).join("")}</div>`
       : `<input type="text" id="deck-ans" autocomplete="off" aria-label="Your answer">`;
     app.innerHTML = `<section class="card"><p class="eyebrow">Missed problems · ${i + 1} of ${r.problems.length} · box ${c.box + 1}/3</p>
-      <p class="muted">${esc(c.topic)}</p><div class="prompt">${esc(c.prompt)}</div>${input}
+      <p class="muted">${esc(c.topic)}</p><div class="prompt">${mathHtml(c.prompt)}</div>${input}
       <div class="row">${c.type !== "mcq" ? `<button class="btn primary" id="deck-go">Check ⏎</button>` : ""}
       ${c.rule ? `<button class="btn" id="deck-rule">📐 Rule</button>` : ""}</div><div id="fx"></div></section>`;
     const send = async (text) => {

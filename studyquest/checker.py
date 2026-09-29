@@ -287,11 +287,11 @@ def stuck(task_id: str, check_id: str | None = None, q_index: int = 0) -> str:
     return ai.short(ai.ask("claude", prompts.stuck(task, question, chunks)).get("step", ""))
 
 
-def explain(task_id: str, check_id: str | None = None, q_index: int = 0) -> dict:
+def explain(task_id: str, check_id: str | None = None, q_index: int = 0, problem: str | None = None) -> dict:
     p, plan = progress.load(), progress.load_plan()
     _, task = progress.find_task(plan, task_id)
     chk = p.get("checks", {}).get(check_id) if check_id else None
-    question = chk["questions"][q_index]["q"] if chk and q_index < len(chk["questions"]) else None
+    question = problem or (chk["questions"][q_index]["q"] if chk and q_index < len(chk["questions"]) else None)
     provider = "gemini" if ai.gemini_enabled() else "claude"
     text = ai.ask(provider, prompts.explain_differently(task, question)).get("explanation", "")
     return {"by": provider, "text": ai.short(text, 5)}

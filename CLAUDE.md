@@ -72,6 +72,12 @@ it runs the app, answers the `/quest-*` commands, and tutors. Gemini (`agy -p`) 
    (`work_required`): a typed answer without a photo gets a prompt, or half damage if sent anyway.
    Every non-clean problem enters the per-problem review deck (`review.add_problem_card`).
    Known wrong answers ("traps") get targeted feedback. Rule costs 25% (same as a nudge).
+   Answer kinds: mcq, numeric (incl. DNE/∞), expression, multi (points/vectors, <a,b>, i/j/k), equation (planes,
+   any equivalent form), line (parametric, any point/parallel direction), set (unordered points), classify
+   (local/absolute max/min, saddle, inconclusive, DNE), direction (positive multiple), short (AI-graded).
+   Within 10 days of an exam the Quest screen shows an exam-focus card that starts a run in that course's
+   earliest open zone, whatever today's session is. Server autostarts at login (launchd
+   com.marven.studyquest.server); daily reminder 20:55 (com.marven.studyquest.remind → scripts/remind.sh).
    Hints cost damage, never XP. Loot is cosmetic; consumables only help practise (free hint, undo one miss).
    Rewards come from correctness and spacing only (see `docs/game-design.md` §5 guardrails). No shame copy.
 10. Everything happens in the app: problems, the source pages (reader), explanations. Don't send the user elsewhere.

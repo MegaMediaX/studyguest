@@ -94,7 +94,9 @@ def _zone(p: dict, z: dict, sessions: list[dict], exams: list[dict], course: str
                  or (days is not None and days <= OPEN_BEFORE_EXAM_DAYS))
     state = "sealed" if tier == "Mastered" else "open" if reachable and tasks else "locked"
     corruption = 0.0 if state == "sealed" or days is None else round(max(0.0, 1 - days / CORRUPTION_WINDOW), 2)
-    open_tasks = [t for t in tasks if not progress.is_done(p, t["id"]) and t["kind"] != "action"]
+    kind_order = {"exercise": 0, "produce": 1, "reading": 2}  # solve first; reading-only tasks last
+    open_tasks = sorted((t for t in tasks if not progress.is_done(p, t["id"]) and t["kind"] != "action"),
+                        key=lambda t: kind_order.get(t["kind"], 1))
     bestiary = [b for tid, b in p.get("bestiary", {}).items() if tid in ids]
     return {"id": z["id"], "name": z["name"], "icon": z.get("icon", ""), "x": z["x"], "y": z["y"],
             "mastery": mastery, "tier": tier, "state": state, "corruption": corruption,

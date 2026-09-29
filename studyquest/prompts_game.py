@@ -5,9 +5,14 @@ from .prompts import _sources_block
 
 TYPE_GUIDE = """Problem types (prefer the machine-checkable ones; the app grades them instantly):
 - "mcq": 4 choices, "answer" = index 0-3. Good for concepts, traps, "which formula".
-- "numeric": "answer" = a number or simple exact form like "sqrt(2)/2", "3*pi/4", "0.35".
-- "expression": "answer" in x, y, z (or r, theta, t) using * and ** (e.g. "2*x*y + y**2", "exp(x*y)*cos(y)").
-- "multi": an ordered tuple like a point, vector or pair, e.g. "(1, -2)" or "(2/3, 1/3, 2/3)".
+- "numeric": a number or exact form ("sqrt(2)/2", "3*pi/4", "0.35"); for limits also "DNE" or "inf".
+- "expression": in x, y, z (or r, theta, t) using * and ** (e.g. "2*x*y + y**2", "exp(x*y)*cos(y)").
+- "multi": an ordered tuple: a point, a gradient, a vector, or several requested quantities in the stated order.
+- "equation": a plane/surface/level curve as an equation, e.g. "2*x + 2*y + z = 6" (any equivalent form is accepted).
+- "line": a parametric line in t, e.g. "(1 + 2*t, 1 + 2*t, 2 + t)" (any point on it and parallel direction accepted).
+- "set": an unordered set of points or values, e.g. "(0, 0), (1, 1)" for critical points or Lagrange candidates.
+- "classify": one of "local max", "local min", "absolute max", "absolute min", "saddle", "inconclusive", "DNE".
+- "direction": a direction vector where any positive multiple counts, e.g. "(3, -4)".
 - "short": one-line explanation; graded by a tutor. Use at most once."""
 
 
@@ -20,7 +25,10 @@ COURSE_FORMAT = {
 }
 
 
-def encounter(task: dict, session: dict, chunks: list[dict], variant: str = "", course: str | None = None) -> str:
+def encounter(task: dict, session: dict, chunks: list[dict], variant: str = "", course: str | None = None,
+              used: list[str] | None = None) -> str:
+    avoid = ("Do NOT reuse any of these functions/setups already used for this topic:\n- " + "\n- ".join(used[:12])
+             if used else "")
     if task["kind"] == "exercise":
         focus = ("This is an exercise task. Turn the assigned exercises into the problems: copy the actual problem "
                  "statements from the sources when they are there (numbers included) and ask for the final result. "
@@ -37,6 +45,16 @@ Session: {session['session']} ({session['subject']})
 {focus}
 {COURSE_FORMAT.get(course or "", "")}
 {variant}
+{avoid}
+Rules for every problem:
+- NEVER state an earlier problem's answer (or a quantity it asks for) in a later prompt or hint; each problem must
+  make the student compute what it needs. Chain steps the way exams do (compute ∇f AND use it in the same problem).
+- The key must answer exactly what the prompt asks. If it asks for several things, use "multi" with the key in the
+  stated order. No yes/no prompts unless the type is mcq.
+- State the point, whether u must be a unit vector, and the form wanted (exact vs decimal) in the prompt.
+- In hints and solutions refer to MCQ choices by their letter A-D or their text, never by an index number.
+- Invent fresh functions with nice integer values at the point; don't reuse textbook worked examples.
+- Solution texts in the sources can contain OCR mistakes: re-derive every key yourself.
 
 Write:
 1. "enemy": a fun 2-3 word monster name tied to the topic (e.g. "Gradient Golem", "Reluctance Wraith").

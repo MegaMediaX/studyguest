@@ -47,7 +47,8 @@ def plan_queue(p: dict, plan: dict, session: dict | None = None) -> list[dict]:
     if not session:
         raise KeyError("No session to run.")
     queue = [{"task_id": c["task_id"], "mode": "review"} for c in review.interleave(review.due_cards(p))[:MAX_REVIEWS]]
-    for t in session["tasks"]:
+    kind_order = {"exercise": 0, "produce": 1, "reading": 2}  # problems before reading
+    for t in sorted(session["tasks"], key=lambda t: kind_order.get(t["kind"], 1)):
         if len(queue) >= MAX_FLOORS:
             break
         if t["kind"] != "action" and not progress.is_done(p, t["id"]) and all(q["task_id"] != t["id"] for q in queue):

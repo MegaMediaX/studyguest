@@ -49,7 +49,33 @@ def today_quest(p: dict, plan: dict) -> dict:
         "review_due": len(review.due_cards(p)),
         "rift": rift(p, plan, current),
         "mock_today": mock_today(p),
+        "exam_focus": exam_focus(p, plan),
     }
+
+
+EXAM_FOCUS_DAYS = 10
+
+
+def exam_focus(p: dict, plan: dict) -> dict | None:
+    """Within 10 days of an exam: point at that course's open work (backlog first), whatever today's plan says."""
+    from . import world
+    exam = next(iter(exams_countdown()), None)
+    if not exam or exam["days"] > EXAM_FOCUS_DAYS:
+        return None
+    region = next((r for r in world.build(p, plan) if r["course"] == exam["course"]), None)
+    if not region:
+        return None
+    zones = [z for z in region["zones"] if z["state"] == "open" and z["open_tasks"]
+             and (not z["exam"] or z["exam"]["name"] == exam["name"])]
+    if not zones:
+        return None
+    today = store.today().isoformat()
+    behind = sum(1 for s in plan["sessions"] if s["date"] and s["date"] < today
+                 for t in s["tasks"] if t["kind"] != "action" and not progress.is_done(p, t["id"])
+                 and world.zone_of(s, store.load_config().get("world", [])) in {z["id"] for z in region["zones"]})
+    zone = zones[0]  # earliest open zone in the exam's path: backlog before new material
+    return {"exam": exam["name"], "days": exam["days"], "course": exam["course"], "zone": zone["id"],
+            "zone_name": zone["name"], "behind": behind, "open": sum(len(z["open_tasks"]) for z in zones)}
 
 
 def mock_today(p: dict) -> dict | None:

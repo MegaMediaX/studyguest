@@ -26,7 +26,7 @@ RULE_COST = 0.25          # the rule is more telling than a nudge, so it costs a
 WORK_BONUS, WORK_PENALTY = 1.25, 0.5   # photo of working: valid method bonus / right answer, wrong method
 XP_HIT, XP_HIT_LATE = 2, 1
 XP_CHIMERA = 10
-LOCAL_KINDS = {"mcq", "numeric", "expression", "multi"}
+LOCAL_KINDS = {"mcq", "numeric", "expression", "multi", "equation", "line", "set", "classify", "direction"}
 PREFETCH = threading.Semaphore(2)
 TIMED_SECONDS = 120
 CHIMERA_SIZE = 5
@@ -64,14 +64,25 @@ def _validate_problem(q: dict) -> dict | None:
             choices = [str(c) for c in q.get("choices") or []]
             if not 2 <= len(choices) <= 6 or not 0 <= int(q["answer"]) < len(choices):
                 return None
-            return {**base, "choices": choices, "answer": int(q["answer"])}
+            traps = []
+            for t in base["traps"]:
+                a = t["answer"].strip()
+                idx = int(a) if a.isdigit() else next((i for i, c in enumerate(choices) if c.strip() == a), None)
+                if idx is not None and 0 <= idx < len(choices):
+                    traps.append({"answer": str(idx), "why": t["why"]})
+            return {**base, "choices": choices, "answer": int(q["answer"]), "traps": traps}
+        key = str(q["answer"])
         if kind == "numeric":
-            mathcheck.value(str(q["answer"]))
+            if not mathcheck.special(key):
+                mathcheck.value(key)
         elif kind == "expression":
-            mathcheck.parse(str(q["answer"]))
+            mathcheck.parse(key)
         elif kind == "multi":
-            for part in mathcheck.split_multi(str(q["answer"])):
+            for part in mathcheck.split_multi(key):
                 mathcheck.parse(part)
+        elif kind in {"equation", "line", "set", "classify", "direction"}:
+            if not mathcheck.readable(kind, key, None, key) or not mathcheck.check(kind, key, key):
+                raise mathcheck.NotMath(f"unusable {kind} key")
         elif kind != "short":
             return None
     except (mathcheck.NotMath, KeyError, TypeError, ValueError, ArithmeticError):
@@ -102,8 +113,14 @@ def generate(task: dict, session: dict, variant: str = "") -> dict:
 def _generate(task: dict, session: dict, variant: str) -> dict:
     chunks = corpus.retrieve(task["text"], session["session"], session["subject"], k=5)
     course = course_for_subject(session["subject"])
-    reply = ai.ask("claude", prompts_game.encounter(task, session, chunks, variant, course))
+    used = _used_setups(session) if variant else []
+    reply = ai.ask("claude", prompts_game.encounter(task, session, chunks, variant, course, used))
     problems = [p for p in (_validate_problem(q) for q in reply.get("problems", [])) if p][:6]
+    if course in WORK_REQUIRED_COURSES:  # written exam: at most one multiple-choice question
+        mcqs = [p for p in problems if p["type"] == "mcq"]
+        if len(mcqs) > 1 and len(problems) - len(mcqs) + 1 >= 3:
+            keep = min(mcqs, key=lambda p: p["difficulty"])
+            problems = [p for p in problems if p["type"] != "mcq" or p is keep]
     if len(problems) < 2:
         raise ai.AIUnavailable("Couldn't build a battle for this task; try again.")
     problems = keycheck.verify(problems)
@@ -128,6 +145,14 @@ def _generate(task: dict, session: dict, variant: str) -> dict:
                        "example": lesson.get("example") if isinstance(lesson.get("example"), dict) else None},
             "pages": pages, "problems": problems, "grounded": bool(chunks),
             "notice": _notice(task, session, chunks)}
+
+
+def _used_setups(session: dict) -> list[str]:
+    """Prompts already used in this session's battles, so rematches invent new functions."""
+    p = progress.load()
+    ids = {t["id"] for t in session["tasks"]}
+    return [q["prompt"][:140] for tid, enc in p.get("encounters", {}).items() if tid in ids
+            for q in enc.get("problems", [])][:12]
 
 
 def _notice(task: dict, session: dict, chunks: list[dict]) -> str | None:
@@ -363,9 +388,14 @@ def _grade(prob: dict, answer: str) -> tuple[bool, str, bool]:
     return float(r.get("score", 0)) >= PASS, str(r.get("feedback", "")), False
 
 
-FORMAT_HELP = {"mcq": "Pick A–D (or 1–4).", "numeric": "Type a number, e.g. -2, 3/4, sqrt(2)/2 or 3pi/4.",
+FORMAT_HELP = {"mcq": "Pick A–D (or 1–4).", "numeric": "Type a number, e.g. -2, 3/4, sqrt(2)/2, 3pi/4 (or DNE / ∞).",
                "expression": "Type an expression, e.g. 2xy + y^2 or e^(xy).",
-               "multi": "Type all the parts, e.g. (1, -2) or (2/3, 1/3, 2/3)."}
+               "multi": "Type all the parts, e.g. (1, -2), <1, 2> or i - 2j.",
+               "equation": "Type an equation with one '=', e.g. 2x + 2y + z = 6.",
+               "line": "Type the line in t, e.g. (1 + 2t, 1 + 2t, 2 + t) or x=1+2t, y=1+2t, z=2+t.",
+               "set": "List the points, e.g. (0, 0), (1, 1).",
+               "classify": "Type: local max, local min, saddle, inconclusive, or DNE.",
+               "direction": "Type a vector, e.g. (3, -4) (any positive multiple counts)."}
 
 
 def answer(task_id: str, idx: int, text: str, photo: str | None = None, no_work: bool = False) -> dict:

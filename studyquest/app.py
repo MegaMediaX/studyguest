@@ -149,6 +149,7 @@ class Help(BaseModel):
     task_id: str
     check_id: str | None = None
     q_index: int = 0
+    problem: str | None = Field(None, max_length=1200)
 
 
 @app.post("/api/help/stuck")
@@ -158,7 +159,7 @@ def api_stuck(body: Help):
 
 @app.post("/api/help/explain")
 def api_explain(body: Help):
-    return checker.explain(body.task_id, body.check_id, body.q_index)
+    return checker.explain(body.task_id, body.check_id, body.q_index, body.problem)
 
 
 class Override(BaseModel):
@@ -383,14 +384,15 @@ def api_prefetch_tomorrow():
 
 
 @app.get("/api/run/preview")
-def api_run_preview():
-    """The floors a run would have right now, so the UI can prefetch them before you press Start."""
+def api_run_preview(zone: str | None = None):
+    """The floors a run would have right now (optionally in a zone), so the UI can prefetch them."""
     p, plan = _state()
-    if p.get("run") and p["run"]["state"] == "active":
+    if not zone and p.get("run") and p["run"]["state"] == "active":
         return {"queue": [q["task_id"] for q in p["run"]["queue"][p["run"]["floor"]:]]}
     try:
-        return {"queue": [q["task_id"] for q in run.plan_queue(p, plan)]}
-    except KeyError:
+        q = world.zone_queue(p, plan, zone, run.MAX_FLOORS) if zone else run.plan_queue(p, plan)
+        return {"queue": [x["task_id"] for x in q if not x["task_id"].startswith("chimera:")]}
+    except (KeyError, ValueError):
         return {"queue": []}
 
 

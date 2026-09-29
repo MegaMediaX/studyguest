@@ -14,7 +14,12 @@ import re
 FUNCS = {"sqrt": math.sqrt, "sin": math.sin, "cos": math.cos, "tan": math.tan, "exp": math.exp,
          "ln": math.log, "log": math.log, "asin": math.asin, "acos": math.acos, "atan": math.atan,
          "arcsin": math.asin, "arccos": math.acos, "arctan": math.atan, "abs": abs,
-         "sinh": math.sinh, "cosh": math.cosh, "tanh": math.tanh}
+         "sinh": math.sinh, "cosh": math.cosh, "tanh": math.tanh,
+         "sec": lambda v: 1 / math.cos(v), "csc": lambda v: 1 / math.sin(v), "cot": lambda v: 1 / math.tan(v)}
+_FN_RE = "|".join(sorted(FUNCS, key=len, reverse=True))
+DNE_WORDS = {"dne", "doesnotexist", "doesn'texist", "undefined", "noLimit".lower(), "nolimit"}
+INF_WORDS = {"∞": "inf", "+∞": "inf", "infinity": "inf", "+infinity": "inf", "inf": "inf",
+             "-∞": "-inf", "−∞": "-inf", "-infinity": "-inf", "−infinity": "-inf", "-inf": "-inf"}
 CONSTS = {"pi": math.pi, "e": math.e}
 VAR_NAMES = {"x", "y", "z", "t", "u", "v", "w", "r", "s", "a", "b", "c", "k", "rho", "theta", "phi", "lam", "mu"}
 OPS = {ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b, ast.Mult: lambda a, b: a * b,
@@ -27,11 +32,48 @@ class NotMath(ValueError):
     pass
 
 
+def _latex(s: str) -> str:
+    r"""Tolerate LaTeX-ish input (the AI's own explanations use it): \frac{a}{b}, e^{xy}, \cdot, \sin."""
+    s = re.sub(r"\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}", r"(\1)/(\2)", s)
+    for a, b in (("\\cdot", "*"), ("\\times", "*"), ("\\left", ""), ("\\right", ""), ("\\", "")):
+        s = s.replace(a, b)
+    return s.replace("{", "(").replace("}", ")")
+
+
+def _functions(s: str) -> str:
+    """sin^2(x) -> (sin(x))^2 ; 'ln t', 'sin 2x', 'cosx', 'lnt' -> ln(t), sin(2x), cos(x), ln(t)."""
+    s = re.sub(rf"\b({_FN_RE})\s*\^\s*(\d+)\s*\(([^()]*)\)", r"(\1(\3))^\2", s)
+    s = re.sub(rf"\b({_FN_RE})\s*\^\s*(\d+)\s*(\d*[a-z]+)", r"(\1(\3))^\2", s)
+    s = re.sub(rf"\b({_FN_RE})\s+(\d+(?:\.\d+)?[a-z]*|[a-z]+)\b", r"\1(\2)", s)   # 'ln t', 'sin 2x'
+
+    def glued(m: re.Match) -> str:  # 'cosx' -> cos(x), but leave real names like 'cosh', 'sqrt'
+        word = m.group(0)
+        if word in FUNCS or word in CONSTS or word in VAR_NAMES:
+            return word
+        for fn in sorted(FUNCS, key=len, reverse=True):
+            rest = word[len(fn):]
+            if word.startswith(fn) and rest and all(ch in VAR_NAMES or ch == "e" for ch in rest):
+                return f"{fn}({rest})"
+        return word
+    s = re.sub(r"[a-z]+(?!\()", glued, s)
+    return re.sub(r"([a-z0-9)])\s+([a-z(])", r"\1*\2", s)  # 't ln(t)' -> t*ln(t) before spaces vanish
+
+
+def _strip_lhs(s: str) -> str:
+    """'f_x = 2x', 'dw/dt = 1', '∂z/∂x = ...', 'f_x(1,2) = 3' -> just the right-hand side."""
+    if s.count("=") != 1:
+        return s
+    lhs, rhs = s.split("=")
+    if re.fullmatch(r"\s*[a-z∂_'′/ ]*(\([^)]*\))?\s*", lhs) and lhs.strip():
+        return rhs
+    return s
+
+
 def normalize(text: str) -> str:
     s = str(text).strip().lower()
     if len(s) > MAX_LEN:
         raise NotMath("too long")
-    s = re.sub(r"^[a-z_]\w*(\([^)]*\))?\s*=\s*", "", s) if s.count("=") == 1 else s  # "f_x = 2x" -> "2x"
+    s = _strip_lhs(_functions(_latex(s)))
     repl = {"√": "sqrt", "π": "pi", "θ": "theta", "φ": "phi", "ϕ": "phi", "ρ": "rho", "λ": "lam", "μ": "mu",
             "×": "*", "·": "*", "⋅": "*", "÷": "/", "−": "-", "–": "-", "^": "**", "²": "**2", "³": "**3",
             "°": "*pi/180", "%": "/100"}
@@ -49,8 +91,8 @@ def _implicit_names(s: str) -> str:
         word = m.group(0)
         if word in FUNCS or word in CONSTS or word in VAR_NAMES:
             return word
-        if all(ch in VAR_NAMES for ch in word):
-            return "*".join(word)
+        if len(word) > 1 and all(ch in VAR_NAMES or ch == "e" for ch in word):
+            return "*".join(word)  # 'xy' -> x*y, 'ye' -> y*e (e = Euler's number)
         return word
     return re.sub(r"[a-z]+", fix, s)
 
@@ -99,7 +141,18 @@ def close(a: float, b: float, rel: float = 0.02, abs_tol: float = 1e-6) -> bool:
     return math.isclose(a, b, rel_tol=rel, abs_tol=abs_tol)
 
 
+def special(text: str) -> str | None:
+    """'DNE' / '∞' style answers (limits) as sentinels."""
+    t = re.sub(r"\s+", "", str(text).strip().lower())
+    if t in DNE_WORDS:
+        return "dne"
+    return INF_WORDS.get(t)
+
+
 def same_number(student: str, key: str, rel: float = 0.02) -> bool:
+    if special(student) or special(key):
+        return special(student) == special(key)
+    student = re.sub(r"^(-?\d+),(\d+)$", r"\1.\2", str(student).strip())  # 1,5 -> 1.5 (comma decimal)
     try:
         return close(value(student), value(key), rel)
     except (NotMath, ArithmeticError, ValueError, TypeError):
@@ -131,9 +184,52 @@ def same_expression(student: str, key: str, rel: float = 1e-4, trials: int = 6) 
     return ok >= 2
 
 
+def _ijk(text: str) -> list[str] | None:
+    """'2i - 3j + k', '1i+2j' -> ['2', '-3', '1'] (None if not unit-vector notation)."""
+    t = str(text).strip().replace("−", "-").replace(" ", "")
+    if "," in t or not re.search(r"[ijk](?=[+\-]|$)", t):
+        return None
+    parts = {"i": "0", "j": "0", "k": "0"}
+    depth, term, terms = 0, "", []
+    for ch in t:
+        depth += ch == "("
+        depth -= ch == ")"
+        if ch in "+-" and depth == 0 and term:
+            terms.append(term)
+            term = ""
+        term += ch
+    terms.append(term)
+    for term in terms:
+        m = re.search(r"\*?([ijk])$", term)  # the unit vector ends its term: '2i', 'x*j', 'y^2k'
+        if not m:
+            return None
+        coef = (term[:m.start()] + term[m.end():]).strip("*")
+        coef = {"": "1", "+": "1", "-": "-1"}.get(coef, coef)
+        parts[m.group(1)] = coef
+    used = "ijk" if "k" in t else "ij"
+    return [parts[c] for c in used]
+
+
+def _unwrap(s: str) -> str:
+    """Remove ONE pair of outer brackets only if it encloses the whole text: '(sin(x), cos(y))' -> 'sin(x), cos(y)'."""
+    pairs = {"(": ")", "[": "]", "<": ">", "⟨": "⟩", "{": "}"}
+    if len(s) >= 2 and s[0] in pairs and s[-1] == pairs[s[0]]:
+        depth = 0
+        for i, ch in enumerate(s):
+            depth += ch in pairs
+            depth -= ch in pairs.values()
+            if depth == 0 and i < len(s) - 1:
+                return s  # the first bracket closes early: '(a)+(b)' isn't wrapped
+        return s[1:-1]
+    return s
+
+
 def split_multi(text: str) -> list[str]:
-    """'(1, -2)' or '1, -2' or 'x=1, y=-2' -> ['1', '-2'] for point/vector answers."""
-    s = str(text).strip().strip("()[]<>⟨⟩{}")
+    """'(1, -2)' or '1, -2' or 'x=1, y=-2' or '1i - 2j' -> ['1', '-2'] for point/vector answers."""
+    ijk = _ijk(text)
+    if ijk:
+        return ijk
+    s = _unwrap(str(text).strip())
     parts = [p.strip() for p in re.split(r"[,;]", s) if p.strip()]
     return [re.sub(r"^[a-zA-Zα-ω_]\w*\s*=\s*", "", p) for p in parts]
 
@@ -152,7 +248,148 @@ def check(kind: str, student: str, key, choices: list | None = None, tolerance: 
     if kind == "multi":  # ordered tuple of numbers/expressions, e.g. a point or a vector
         s, k = split_multi(student), split_multi(str(key))
         return len(s) == len(k) and all(same_number(a, b, tolerance) or same_expression(a, b) for a, b in zip(s, k))
+    if kind == "equation":
+        return same_equation(student, str(key))
+    if kind == "line":
+        return same_line(student, str(key))
+    if kind == "set":
+        return same_set(student, str(key), tolerance)
+    if kind == "classify":
+        return classify_label(student) is not None and classify_label(student) == classify_label(str(key))
+    if kind == "direction":
+        return same_direction(student, str(key))
     raise ValueError(f"not locally checkable: {kind}")
+
+
+# ---------- calculus answer kinds ----------
+
+def _side_diff(eq: str):
+    """'2x+2y+z=6' -> parsed (lhs - rhs)."""
+    if str(eq).count("=") != 1:
+        raise NotMath("an equation needs exactly one '='")
+    lhs, rhs = str(eq).split("=")
+    return parse(f"({lhs}) - ({rhs})")
+
+
+def same_equation(student: str, key: str, trials: int = 8) -> bool:
+    """Same surface/plane: student's (lhs - rhs) is a constant non-zero multiple of the key's."""
+    try:
+        fs, fk = _side_diff(student), _side_diff(key)
+    except NotMath:
+        return False
+    names = free_vars(fs) | free_vars(fk)
+    rnd = random.Random(11)
+    ratio, ok = None, 0
+    for _ in range(trials * 3):
+        env = {n: rnd.uniform(-2.3, 2.7) for n in names}
+        try:
+            a, b = float(_eval(fs, env)), float(_eval(fk, env))
+        except (ArithmeticError, ValueError, NotMath, TypeError):
+            continue
+        if abs(b) < 1e-9:
+            if abs(a) > 1e-6:
+                return False
+            continue
+        r = a / b
+        if ratio is None:
+            ratio = r
+        elif not close(r, ratio, 1e-6, 1e-9):
+            return False
+        ok += 1
+        if ok >= trials:
+            break
+    return ratio is not None and abs(ratio) > 1e-9 and ok >= 3
+
+
+def _line_parts(text: str) -> list[str]:
+    """'x=1+2t, y=1+2t, z=2+t' or '(1+2t, 1+2t, 2+t)' or 'r(t) = <1+2t, ...>' -> component expressions in t."""
+    t = str(text)
+    if re.match(r"^\s*r\s*\(\s*t\s*\)\s*=", t):
+        t = t.split("=", 1)[1]
+    return split_multi(t)
+
+
+def same_line(student: str, key: str) -> bool:
+    """Same line in space: a student point lies on the key line and the directions are parallel."""
+    try:
+        s_parts, k_parts = _line_parts(student), _line_parts(key)
+        if len(s_parts) != len(k_parts) or len(s_parts) < 2:
+            return False
+        ts = [parse(x) for x in s_parts]
+        tk = [parse(x) for x in k_parts]
+        s0 = [float(_eval(x, {"t": 0.0})) for x in ts]
+        s1 = [float(_eval(x, {"t": 1.0})) for x in ts]
+        k0 = [float(_eval(x, {"t": 0.0})) for x in tk]
+        k1 = [float(_eval(x, {"t": 1.0})) for x in tk]
+    except (NotMath, ArithmeticError, ValueError, TypeError):
+        return False
+    ds = [b - a for a, b in zip(s0, s1)]
+    dk = [b - a for a, b in zip(k0, k1)]
+    return _parallel(ds, dk) and _parallel([a - b for a, b in zip(s0, k0)], dk, allow_zero=True)
+
+
+def _parallel(u: list[float], v: list[float], allow_zero: bool = False) -> bool:
+    nu, nv = math.sqrt(sum(a * a for a in u)), math.sqrt(sum(a * a for a in v))
+    if nu < 1e-9:
+        return allow_zero
+    if nv < 1e-9:
+        return False
+    cos = abs(sum(a * b for a, b in zip(u, v))) / (nu * nv)
+    return cos > 1 - 1e-6
+
+
+def same_direction(student: str, key: str) -> bool:
+    """A direction vector: any positive multiple counts ((3,-4) == (3/5,-4/5))."""
+    try:
+        s = [value(x) for x in split_multi(student)]
+        k = [value(x) for x in split_multi(key)]
+    except (NotMath, ArithmeticError, ValueError, TypeError):
+        return False
+    if len(s) != len(k) or not _parallel(s, k):
+        return False
+    return sum(a * b for a, b in zip(s, k)) > 0
+
+
+def split_points(text: str) -> list[str]:
+    """'(0,0), (1,1)' or '{(0,0);(1,-1)}' -> ['(0,0)', '(1,1)']; bare numbers '1, -1' -> ['1', '-1']."""
+    t = str(text).strip().strip("{}[]")
+    pts = re.findall(r"[(<⟨][^()<>⟨⟩]*[)>⟩]", t)
+    if pts:
+        return pts
+    return [x.strip() for x in re.split(r"[,;]| and ", t) if x.strip()]
+
+
+def same_set(student: str, key: str, tolerance: float = 0.02) -> bool:
+    """Unordered set of points/values (critical points, Lagrange candidates)."""
+    s, k = split_points(student), split_points(key)
+    if len(s) != len(k):
+        return False
+    left = list(k)
+    for item in s:
+        match = next((kk for kk in left if check("multi" if kk.startswith(("(", "<", "⟨")) else "numeric",
+                                                    item, kk, None, tolerance)), None)
+        if match is None:
+            return False
+        left.remove(match)
+    return True
+
+
+CLASSES = [("inconclusive", ("inconclusive", "test fails", "no conclusion", "can't tell", "cannot tell",
+                             "d = 0", "d=0")),
+           ("saddle", ("saddle",)), ("dne", ("dne", "does not exist", "doesn't exist")),
+           ("max", ("max",)), ("min", ("min",)), ("none", ("none", "neither", "no extrem"))]
+
+
+def classify_label(text: str) -> str | None:
+    """'local maximum', 'rel. max', 'Saddle point' -> 'local max' / 'saddle'...; None if unrecognised."""
+    t = str(text).strip().lower()
+    for label, words in CLASSES:
+        if any(w in t for w in words):
+            if label in {"max", "min"}:
+                scope = "absolute" if any(w in t for w in ("abs", "global")) else "local"
+                return f"{scope} {label}"
+            return label
+    return None
 
 
 def _choice_index(student: str, choices: list) -> int | None:
@@ -186,10 +423,25 @@ def readable(kind: str, student: str, choices: list | None = None, key=None) -> 
         if kind == "mcq":
             return _choice_index(student, choices or []) is not None
         if kind == "numeric":
+            if special(student):
+                return True
+            student = re.sub(r"^(-?\d+),(\d+)$", r"\1.\2", student)
             return not free_vars(_single(student))
         if kind == "expression":
             allowed = (free_vars(_single(str(key))) if key is not None else VAR_NAMES) | {"c"}
             return free_vars(_single(student)) <= allowed
+        if kind == "equation":
+            _side_diff(student)
+            return True
+        if kind == "line":
+            parts = _line_parts(student)
+            return len(parts) >= 2 and all(free_vars(parse(x)) <= {"t", "s"} for x in parts)
+        if kind == "set":
+            return bool(split_points(student))
+        if kind == "classify":
+            return classify_label(student) is not None
+        if kind == "direction":
+            return all(not free_vars(_single(x)) for x in split_multi(student)) and bool(split_multi(student))
         if kind == "multi":
             parts = split_multi(student)
             key_parts = split_multi(str(key)) if key is not None else None

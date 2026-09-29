@@ -329,3 +329,7 @@ nav button { min-height: 44px; }
 @media (max-width: 820px) { #hud-title { display: none; } }
 @media (max-width: 560px) { .battle .hp span { font-size: .66rem; } }
 .victory .stat-row { flex-wrap: wrap; }
+
+/* calculus review */
+.exam-focus { border-color: var(--accent); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, var(--panel)), var(--panel)); }
+sup { font-size: .72em; line-height: 0; } sub { font-size: .72em; line-height: 0; }

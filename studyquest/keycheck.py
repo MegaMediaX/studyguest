@@ -8,7 +8,7 @@ import json
 
 from . import ai, mathcheck
 
-CHECKABLE = {"mcq", "numeric", "expression", "multi"}
+CHECKABLE = {"mcq", "numeric", "expression", "multi", "equation", "line", "set", "classify", "direction"}
 
 
 def _prompt(problems: list[tuple[int, dict]]) -> str:
@@ -19,8 +19,10 @@ def _prompt(problems: list[tuple[int, dict]]) -> str:
             item["choices"] = q["choices"]
         items.append(item)
     return f"""Solve each problem independently and carefully. Give only the final answer.
-Formats: mcq = the 0-based index of the correct choice; numeric = a number or exact form like "sqrt(2)/2";
-expression = in x, y, z using * and ** (e.g. "2*x*y"); multi = a tuple like "(1, -2)".
+Formats: mcq = the 0-based index of the correct choice; numeric = a number, exact form like "sqrt(2)/2", or "DNE";
+expression = in x, y, z using * and ** (e.g. "2*x*y"); multi = a tuple like "(1, -2)"; equation = "2*x+y+z=4";
+line = "(1+2*t, 2-t, 3*t)"; set = "(0,0), (1,1)"; classify = "local max"/"local min"/"saddle"/"inconclusive";
+direction = a vector like "(3,-4)".
 Problems: {json.dumps(items, ensure_ascii=False)}
 Reply with JSON only: {{"answers": [{{"i": 0, "answer": "..."}}]}}"""
 

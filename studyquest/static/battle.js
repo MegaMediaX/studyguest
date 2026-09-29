@@ -11,9 +11,14 @@ function monsterFor(name) {
   return MONSTERS[h % MONSTERS.length];
 }
 const FORMAT_HINT = {
-  numeric: "A number or exact form: 5/√2 · sqrt(2)/2 · 3pi/4 · -1.25",
+  equation: "An equation: 2x + 2y + z = 6 (any equivalent form)",
+  line: "A line in t: (1 + 2t, 1 + 2t, 2 + t)",
+  set: "The points: (0, 0), (1, 1) (any order)",
+  classify: "local max · local min · saddle · inconclusive · DNE",
+  direction: "A vector: (3, -4) (any positive multiple)",
+  numeric: "A number or exact form: 5/√2 · sqrt(2)/2 · 3pi/4 · -1.25 · DNE · ∞",
   expression: "An expression: 2xy + y^2 · e^(xy) · sqrt(x^2+y^2)",
-  multi: "A point or vector: (1, -2) or (2/3, 1/3, 2/3)",
+  multi: "A point or vector: (1, -2) · <1, 2> · i − 2j",
   short: "One line in your own words",
 };
 
@@ -90,10 +95,10 @@ function lessonHtml(d) {
   return `<div class="scroll">
       <p class="eyebrow">📜 Scroll of knowledge · 1 minute</p>
       <h2>${esc(L.title)}</h2>
-      <ul class="points">${L.points.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>
-      ${L.formula ? `<div class="formula">${esc(L.formula)}</div>` : ""}
-      ${ex ? `<details class="example"><summary>See a worked example</summary><p><b>${esc(ex.problem)}</b></p>
-        <ol>${(ex.steps || []).map((s) => `<li>${esc(s)}</li>`).join("")}</ol><p>→ <b>${esc(ex.answer)}</b></p></details>` : ""}
+      <ul class="points">${L.points.map((p) => `<li>${mathHtml(p)}</li>`).join("")}</ul>
+      ${L.formula ? `<div class="formula">${mathHtml(L.formula)}</div>` : ""}
+      ${ex ? `<details class="example"><summary>See a worked example</summary><p><b>${mathHtml(ex.problem)}</b></p>
+        <ol>${(ex.steps || []).map((s) => `<li>${mathHtml(s)}</li>`).join("")}</ol><p>→ <b>${mathHtml(ex.answer)}</b></p></details>` : ""}
       ${d.pages.length ? `<button class="btn" id="read-src">📖 Read the course pages here (${d.pages.length})</button>` : ""}
     </div>
     <div class="row"><button class="btn primary big" id="fight">⚔️ Fight!</button></div>`;
@@ -117,7 +122,7 @@ function problemHtml(p) {
   const key = pkey(p);
   const kept = B.keep?.key === key ? B.keep.text : "";
   const input = p.type === "mcq"
-    ? `<div class="choices">${p.choices.map((c, i) => `<button class="btn choice" data-i="${i}"><b>${"ABCDEF"[i]}</b> ${esc(c)}</button>`).join("")}</div>`
+    ? `<div class="choices">${p.choices.map((c, i) => `<button class="btn choice" data-i="${i}"><b>${"ABCDEF"[i]}</b> ${mathHtml(c)}</button>`).join("")}</div>`
     : p.type === "short"
       ? `<textarea id="ans" aria-label="Your answer" placeholder="${esc(FORMAT_HINT.short)}">${esc(kept)}</textarea>`
       : `<input type="text" id="ans" autocomplete="off" spellcheck="false" aria-label="Your answer" aria-describedby="fmt" value="${esc(kept)}">
@@ -127,7 +132,7 @@ function problemHtml(p) {
   return `<div class="problem">
       <p class="eyebrow">Problem ${p.number} of ${p.total} · difficulty ${"◆".repeat(p.difficulty)}${"◇".repeat(3 - p.difficulty)} ${B.data.tries ? `· <span class="miss-cue">↺ Not quite: 2nd try (half damage)</span>` : ""}
         ${B.data.timer ? `· <span id="qtimer" class="qtimer"></span>` : ""}</p>
-      <div class="prompt">${esc(p.prompt)}</div>
+      <div class="prompt">${mathHtml(p.prompt)}</div>
       ${p.unverified ? `<p class="muted small">⚠ Two graders disagreed on this key, so either answer counts (but it won't count toward ★★★ or seals).</p>` : ""}
       ${p.work_required ? `<p class="exam-style">📝 Exam-style: solve this on paper and send a photo of your working. Correct method = +25%.</p>` : ""}
       ${input}
@@ -267,13 +272,13 @@ function handleHit(r, p) {
   if (r.result === "hit") FX.play(r.crit ? "crit" : "hit", prev.combo); else FX.play("miss");
   if (r.crit) { FX.flash(); FX.screenShake(); }
   const reveal = r.reveal ? `<div class="reveal"><p class="eyebrow">${r.result === "hit" ? "Why it's right" : "The answer"}</p>
-      <p><b>${esc(r.reveal.answer)}</b>${r.reveal.alt?.length ? ` <span class="muted small">(also accepted: ${r.reveal.alt.map(esc).join(", ")})</span>` : ""}</p>${r.reveal.explain ? `<p>${esc(r.reveal.explain)}</p>` : ""}
-      ${r.reveal.solution ? `<details><summary>Worked solution</summary><p class="pre">${esc(r.reveal.solution)}</p></details>` : ""}
+      <p><b>${mathHtml(r.reveal.answer)}</b>${r.reveal.alt?.length ? ` <span class="muted small">(also accepted: ${r.reveal.alt.map(mathHtml).join(", ")})</span>` : ""}</p>${r.reveal.explain ? `<p>${mathHtml(r.reveal.explain)}</p>` : ""}
+      ${r.reveal.solution ? `<details><summary>Worked solution</summary><p class="pre">${mathHtml(r.reveal.solution)}</p></details>` : ""}
       ${r.result === "fail" ? disputeBtn() : ""}</div>` : "";
   const next = r.outcome ? `<button class="btn primary big" id="next">${r.outcome === "won" ? "🏆 Claim victory" : "Continue"}</button>`
     : `<button class="btn primary big" id="next">Next ⏎</button>`;
   // show the result on the finished problem, then move on
-  app.querySelector(".problem").innerHTML = `<div class="prompt">${esc(p.prompt)}</div>
+  app.querySelector(".problem").innerHTML = `<div class="prompt">${mathHtml(p.prompt)}</div>
     <div class="hit-banner ${r.result}">${r.result === "hit" ? (r.crit ? `💥 CRITICAL! −${r.damage}` : `⚔️ Hit! −${r.damage}`) : "💨 Missed"}</div>
     ${(r.notes || []).map((n) => `<p class="muted">${esc(n)}</p>`).join("")}
     ${r.feedback ? `<div class="helpbox">📝 ${esc(r.feedback)}</div>` : ""}${reveal}<div class="row">${next}</div><div id="fx"></div>`;
@@ -307,7 +312,7 @@ async function showRule(p) {
   try {
     const r = await api("/api/battle/rule", { json: { task_id: B.data.task.id, idx: p.idx } });
     B.data.rule_used = true;
-    addAid(p, `<div class="helpbox rule"><b>📐 Rule to apply</b> <span class="muted small">(−25% damage)</span><p class="pre">${esc(r.rule)}</p></div>`);
+    addAid(p, `<div class="helpbox rule"><b>📐 Rule to apply</b> <span class="muted small">(−25% damage)</span><p class="pre">${mathHtml(r.rule)}</p></div>`);
     if (btn) btn.textContent = "📐 Rule shown";
   } catch (e) { if (btn) btn.disabled = false; showError(e, $(".battle")); }
 }
@@ -318,16 +323,16 @@ async function takeHint(p) {
     vex("hint_used", $(".battle"));
     B.data.hint_level = r.hint_level; B.data.combo = 0;
     const label = r.free ? "Free hint" : ["", "Nudge (−25% dmg)", "Next step (−50% dmg)", "Worked solution (doesn't count toward the win, but now you've seen it)"][r.hint_level];
-    addAid(p, `<div class="helpbox"><b>💡 ${label}</b><p class="pre">${esc(r.hint)}</p></div>`);
+    addAid(p, `<div class="helpbox"><b>💡 ${label}</b><p class="pre">${mathHtml(r.hint)}</p></div>`);
     $("#hint-btn").innerHTML = `💡 Hint <span class="muted small">(${p.hints_available - r.hint_level} left)</span>`;
   } catch (e) { showError(e, $(".battle")); }
 }
 async function explainDifferently(p) {
   $("#hints").insertAdjacentHTML("beforeend", `<div class="helpbox muted" id="exp-wait">Asking for another angle…</div>`);
   try {
-    const r = await api("/api/help/explain", { json: { task_id: B.data.task.id } });
+    const r = await api("/api/help/explain", { json: { task_id: B.data.task.id, problem: p.prompt } });
     $("#exp-wait").remove();
-    addAid(p, `<div class="helpbox">💡 <span class="muted">(${esc(r.by)})</span> ${esc(r.text)}</div>`);
+    addAid(p, `<div class="helpbox">💡 ${mathHtml(r.text)}</div>`);
   } catch (e) { $("#exp-wait").remove(); showError(e, $(".battle")); }
 }
 
