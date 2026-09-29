@@ -147,6 +147,33 @@ def cmd_check(a) -> None:
         return
 
 
+def cmd_pregen(a) -> None:
+    """Build (and cache) the first battle of every open task in a course, so each opens instantly."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from . import encounter
+    from .corpus import course_for_subject
+    p, plan = progress.load(), progress.load_plan()
+    todo = [(s, t) for s, t in importer.all_tasks(plan) if course_for_subject(s["subject"]) == a.course
+            and t["kind"] != "action" and not progress.is_done(p, t["id"]) and (not a.until or (s["date"] or "") <= a.until)]
+    print(f"Pre-generating {len(todo)} {a.course} battles, {a.workers} at a time (cached; safe to stop and rerun)")
+
+    def one(st):
+        s, t = st
+        prev = p.get("encounters", {}).get(t["id"]) or {}
+        mode = "review" if t["id"] in p.get("review", {}) and progress.is_done(p, t["id"]) else "task"
+        encounter.generate(t, s, encounter.variant_for(prev.get("attempt", 0) + 1, mode))
+        return t["text"]
+    done = 0
+    with ThreadPoolExecutor(max_workers=a.workers) as pool:
+        futs = {pool.submit(one, st): st for st in todo}
+        for f in as_completed(futs):
+            done += 1
+            try:
+                print(f"  [{done}/{len(todo)}] ok  {f.result()[:60]}", flush=True)
+            except Exception as e:  # noqa: BLE001 - keep going; the app will retry on open
+                print(f"  [{done}/{len(todo)}] ERR {futs[f][1]['text'][:50]}: {e}", flush=True)
+
+
 def main(argv: list[str] | None = None) -> None:
     store.ensure_dirs()
     ap = argparse.ArgumentParser(prog="studyquest")
@@ -162,6 +189,8 @@ def main(argv: list[str] | None = None) -> None:
     x.add_argument("--photo"); x.set_defaults(fn=cmd_check_submit)
     x = sub.add_parser("resolve"); x.add_argument("check_id"); x.add_argument("pick", choices=["claude", "gemini"])
     x.set_defaults(fn=cmd_resolve)
+    x = sub.add_parser("pregen"); x.add_argument("--course", default="MATH202"); x.add_argument("--workers", type=int, default=2)
+    x.add_argument("--until", help="only sessions up to this date (YYYY-MM-DD)"); x.set_defaults(fn=cmd_pregen)
     x = sub.add_parser("override"); x.add_argument("task"); x.add_argument("--reason", required=True)
     x.set_defaults(fn=cmd_override)
     a = ap.parse_args(argv)
