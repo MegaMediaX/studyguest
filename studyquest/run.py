@@ -41,7 +41,7 @@ MAX_REVIEWS = 1   # one rematch per run keeps new material moving (review load s
 
 
 def plan_queue(p: dict, plan: dict, session: dict | None = None) -> list[dict]:
-    """Up to 2 due rematches first (spacing decides), then the session's open tasks, then — if enough
+    """Up to MAX_REVIEWS due rematches first (spacing decides), then the session's open tasks, then — if enough
     earlier battles exist in this course — a mixed-topic Chimera as the final floor (interleaving)."""
     session = session or _session_for_run(p, plan)
     if not session:
@@ -112,8 +112,9 @@ def on_battle_end(p: dict, enc: dict, outcome: dict) -> dict:
         return {}
     if run["floor"] >= len(run["queue"]) or run["queue"][run["floor"]]["task_id"] != enc["task_id"]:
         return {}  # only the current floor's battle can advance the run
+    minutes = max(1, round((enc.get("ended", time.time()) - enc.get("started", time.time())) / 60))
     run["log"].append({"task_id": enc["task_id"], "enemy": enc["enemy"], "won": outcome["outcome"] == "won",
-                       "stars": outcome.get("stars", 0)})
+                       "stars": outcome.get("stars", 0), "minutes": minutes})
     run["floor"] += 1
     if run["floor"] >= len(run["queue"]):
         return {"run": finish(p)}
@@ -143,7 +144,8 @@ def finish(p: dict, abandoned: bool = False) -> dict:
     cleared = sum(1 for x in run["log"] if x["won"])
     summary = {"id": run["id"], "session": run["session"], "floors": len(run["queue"]), "cleared": cleared,
                "stars": sum(x["stars"] for x in run["log"]), "perks": run["perks"],
-               "minutes": round((time.time() - run["started"]) / 60), "at": store.now_iso(), "abandoned": abandoned}
+               "minutes": sum(x.get("minutes", 0) for x in run["log"]),  # time in battles, not wall clock
+               "at": store.now_iso(), "abandoned": abandoned}
     events = []
     if not abandoned and cleared == len(run["queue"]):
         events = bounties.on_event(p, "run_clear")

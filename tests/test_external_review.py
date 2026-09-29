@@ -82,7 +82,7 @@ def test_missed_problems_enter_the_deck_and_come_back(client, imported, monkeypa
     cards = client.get("/api/review").json()["problems"]
     assert cards[0]["prompt"] == prompt and "answer" not in cards[0]
     card = cards[0]
-    ans = str(card["choices"].index("yes") + 1) if card["type"] == "mcq" else RIGHT[card["type"]]
+    ans = str(card["choice_ids"][card["choices"].index("yes")] + 1) if card["type"] == "mcq" else RIGHT[card["type"]]
     r = client.post("/api/review/problem", json={"pid": card["id"], "answer": ans}).json()
     assert r["result"] == "right" and progress.load()["problem_cards"][cards[0]["id"]]["box"] == 1
 

@@ -271,7 +271,7 @@ def start_chimera(key: str, run_id: str | None) -> dict:
                "lesson": {"title": "Mixed review", "formula": "", "example": None,
                           "points": ["Problems come from different topics, in random order.",
                                      "First decide WHICH idea each one needs, then solve.",
-                                     f"Topics: {', '.join(topics)}"]},
+                                     f"{len(topics)} topics are mixed in; they aren't labelled (that's the point)."]},
                "pages": [], "problems": problems, "grounded": True, "notice": None}
         enc = _new_enc(p, key, task, gen, "chimera", run_id, 1)
         p["encounters"][key] = enc
@@ -520,6 +520,7 @@ def _resolve(p: dict, enc: dict, prob: dict, text: str, correct: bool, feedback:
     enc["tries"] += 1
     if not correct:
         enc["misses"] = enc.get("misses", 0) + 1
+        enc["missed_current"] = True  # survives Second Wind / Retry Token: a second pick isn't a first try
         rewards.on_miss(p)
     if not correct and enc["tries"] < 2:
         enc["combo"] = 0
@@ -531,13 +532,16 @@ def _resolve(p: dict, enc: dict, prob: dict, text: str, correct: bool, feedback:
                 **_view(enc)}
     if work and work.get("method_ok") and correct:
         p.setdefault("work_log", []).append({"at": store.now_iso(), "task_id": enc["task_id"], "photo": work["photo"]})
-    clean = correct and enc["tries"] == 1 and enc["hint_level"] == 0 and not (work and work.get("none"))
+    first_try = enc["tries"] == 1 and not enc.get("missed_current")
+    clean = correct and first_try and enc["hint_level"] == 0 and not (work and work.get("none"))
     last_hint_used = bool(prob["hints"]) and enc["hint_level"] >= len(prob["hints"])
-    solved = correct and not last_hint_used and not (prob["type"] == "mcq" and enc["tries"] > 1)
+    solved = correct and not last_hint_used and not (prob["type"] == "mcq" and not first_try)
     enc["combo"] = enc["combo"] + 1 if clean else 0
     dmg, mult, crit, notes = _damage(enc, prob, correct, work)
     enc["damage"] += dmg
     enc["best_combo"] = max(enc["best_combo"], enc["combo"])
+    if correct and prob["type"] == "mcq" and not first_try:
+        notes.append("🎯 Right, but a second pick doesn't count toward the win (the exam gives one try)")
     enc["results"].append({"idx": enc["current"], "correct": correct, "tries": enc["tries"],
                            "hints": enc["hint_level"], "damage": round(dmg), "answer": text[:300],
                            "work": {"method_ok": work["method_ok"], "photo": work.get("photo")} if work else None,
@@ -585,6 +589,7 @@ def _answer_text(prob: dict) -> str:
 def _advance(enc: dict) -> None:
     """Adaptive order: on a combo take the hardest left, after a miss the easiest; proofs come last."""
     enc["tries"], enc["hint_level"], enc["q_started"], enc["rule_used"] = 0, 0, time.time(), False
+    enc["missed_current"] = False
     enc["free_hints"] = 1 if enc.get("mods", {}).get("first_hint_free") else 0
     if not enc["queue"]:
         enc["current"] = None
@@ -687,7 +692,7 @@ def star_tip(enc: dict, stars: int) -> str:
     if stars == 3:
         return "Perfect: every answer clean on the first try."
     n = len(enc["problems"])
-    misses = sum(1 for r in enc["results"] if not r["correct"] or r["tries"] > 1)
+    misses = sum(1 for r in enc["results"] if not r.get("solved", r["correct"]) or r["tries"] > 1)
     hints = sum(1 for r in enc["results"] if r["hints"])
     parts = [f"{misses} missed first try"] if misses else []
     parts += [f"{hints} used hints"] if hints else []

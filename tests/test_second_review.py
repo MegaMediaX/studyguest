@@ -42,7 +42,7 @@ def test_mcq_second_try_does_not_count_toward_the_win(imported):
     assert encounter._correct_count(enc) == 2 and not encounter.won(enc)
 
 
-@pytest.mark.parametrize("today,expect_max", [("2026-10-05", "2026-10-06"), ("2026-10-06", "2026-10-06"),
+@pytest.mark.parametrize("today,expect_max", [("2026-10-05", "2026-10-06"), ("2026-10-06", "2026-10-07"),
                                               ("2026-10-07", "2026-10-07")])
 def test_review_never_lands_on_or_after_exam_day(imported, monkeypatch, today, expect_max):
     monkeypatch.setenv("STUDYQUEST_TODAY", today)
@@ -84,10 +84,11 @@ def test_chimera_is_random_per_run(imported):
     assert [q["prompt"] for q in a] != [q["prompt"] for q in b]
 
 
-def test_only_shaky_wins_get_a_task_card(imported):
+def test_clean_wins_get_one_confirmation_card_shaky_wins_start_over(imported):
     p, plan = progress.load(), imported["plan"]
-    assert review.schedule(p, plan, _tid(imported), stars=3) == []
-    assert review.schedule(p, plan, _tid(imported), stars=1)[0]["type"] == "review_scheduled"
+    review.schedule(p, plan, _tid(imported, 0), stars=3)
+    review.schedule(p, plan, _tid(imported, 1), stars=1)
+    assert p["review"][_tid(imported, 0)]["box"] == 2 and p["review"][_tid(imported, 1)]["box"] == 0
 
 
 def test_deck_daily_cap_and_shuffled_choices(imported, monkeypatch):
@@ -101,7 +102,7 @@ def test_deck_daily_cap_and_shuffled_choices(imported, monkeypatch):
     p["log"] = []
     shown = review.public_card(review.due_problem_cards(p)[0])
     progress.save(p)
-    pick = shown["choices"].index("b") + 1
+    pick = shown["choice_ids"][shown["choices"].index("b")] + 1  # the client sends the original index
     assert review.answer_problem_card("c1", str(pick))["result"] == "right"
 
 
@@ -123,3 +124,48 @@ def test_sending_without_working_goes_to_the_deck(client, imported, monkeypatch)
 
 def test_runs_have_one_rematch_at_most(imported):
     assert run.MAX_REVIEWS == 1
+
+
+def test_deck_grading_survives_midnight(imported, monkeypatch):
+    p = progress.load()
+    p["problem_cards"] = {"c1": {"id": "c1", "task_id": None, "topic": "T", "box": 0, "due": "2026-09-28",
+                                 "problem": {"type": "mcq", "prompt": "Pick", "answer": 1, "choices": ["a", "b", "c", "d"],
+                                             "explain": "", "hints": [], "rule": "", "traps": [], "alt_answers": []}}}
+    progress.save(p)
+    shown = review.public_card(review.due_problem_cards(progress.load())[0])
+    pick = shown["choice_ids"][shown["choices"].index("b")] + 1
+    monkeypatch.setenv("STUDYQUEST_TODAY", "2026-09-29")  # answered after midnight
+    assert review.answer_problem_card("c1", str(pick))["result"] == "right"
+
+
+def test_clean_zone_can_be_sealed_via_deck_recall(imported):
+    from studyquest import world
+    p, plan = progress.load(), imported["plan"]
+    tids = [t["id"] for s in plan["sessions"] if s["subject"] == "Calc II" and s["session"].startswith(("14.5", "14.6"))
+            for t in s["tasks"]]
+    for t in tids:
+        progress.record_pass(p, plan, t, first_try=True)
+    progress.log(p, "deck_answer", tids[0], correct=True)
+    gorge = next(z for r in world.build(p, plan) for z in r["zones"] if z["id"] == "gradient-gorge")
+    assert gorge["state"] == "sealed"
+
+
+def test_second_wind_mcq_guess_is_not_solved(client, imported):
+    with progress.transaction() as p:
+        r = run.start(p, imported["plan"])
+        r["perks"] = ["second_wind"]
+        rid, tid = r["id"], r["queue"][0]["task_id"]
+    v = client.post("/api/battle/start", json={"task_id": tid, "run_id": rid}).json()
+    assert v["problem"]["type"] == "mcq"
+    _ans(client, tid, v, "D")
+    r2 = _ans(client, tid, v, "B")
+    assert r2["result"] == "hit" and any("second pick" in n for n in r2["notes"])
+    res = progress.load()["encounters"][tid]["results"][-1]
+    assert res["solved"] is False
+
+
+def test_run_summary_minutes_are_battle_time(imported):
+    p = {"run": {"id": "r", "session": "s", "queue": [{"task_id": "a", "mode": "task"}], "floor": 1, "perks": [],
+                 "offer": [], "state": "active", "started": 0, "log": [{"task_id": "a", "enemy": "x", "won": True,
+                                                                        "stars": 2, "minutes": 7}]}, "log": []}
+    assert run.finish(p)["summary"]["minutes"] == 7

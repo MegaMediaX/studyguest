@@ -61,9 +61,11 @@ it runs the app, answers the `/quest-*` commands, and tutors. Gemini (`agy -p`) 
 8. Show one session at a time; only show the full plan when asked.
 9. Battles: every problem must be attempted; a win needs ≥ 60% correct (damage only shapes stars/loot/the show).
    Perk multipliers are capped at ×1.5; stars count correct answers, not damage. Escaping twice → 🔁.
-   Rematches always get new problems (`encounter.variant_for`). Won tasks enter spaced review too
-   (1/2/4 days, never past the day before the course exam). AI answer keys are cross-checked by Gemini
-   (`keycheck.py`); disagreements accept either answer. Unreadable input never costs an attempt.
+   Rematches always get new problems (`encounter.variant_for`). Every win gets one spaced check: 1★ → box 0,
+   ★★/★★★ → one confirmation card (box 2). Missed problems go to the per-problem deck (≤ 10/day, nearest exam
+   first). Review dates aim for exam−2, never exam day, and never repeat a box on the same day. A zone seals
+   at ≥ 80% mastery plus one spaced recall (task rematch or a correct deck answer). AI answer keys are
+   cross-checked by Gemini (`keycheck.py`); disagreements accept either answer. Unreadable input never costs an attempt.
    Photos of working (`/api/battle/answer_photo`, `photos.py` converts HEIC/shrinks via sips): Claude marks
    final answer + method; valid method ×1.25, right answer with a wrong method ×0.5; feedback names the
    first wrong step and must never reveal the answer. MATH202: one problem per battle is "exam-style"

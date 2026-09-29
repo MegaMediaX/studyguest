@@ -99,16 +99,21 @@ def test_streak_with_weekly_freeze():
     assert progress.streak_info(p, date(2026, 9, 28))["current"] == 1  # today not over yet
 
 
-def test_leitner_boxes(imported):
+def test_leitner_boxes(imported, monkeypatch):
     p, plan = progress.load(), imported["plan"]
     tid = plan["sessions"][0]["tasks"][0]["id"]
     review.on_fail(p, plan, tid)
     assert p["tasks"][tid]["status"] == "review" and p["review"][tid]["due"] == "2026-09-29"
+    monkeypatch.setenv("STUDYQUEST_TODAY", "2026-09-29")
     review.on_pass(p, plan, tid)
-    assert p["review"][tid]["box"] == 1 and p["review"][tid]["due"] == "2026-09-30"
+    assert p["review"][tid]["box"] == 1 and p["review"][tid]["due"] == "2026-10-01"
     assert p["tasks"][tid]["status"] == "done" and p["xp"] == 5
+    review.on_pass(p, plan, tid)  # same day again: no box jump (spaced, not massed)
+    assert p["review"][tid]["box"] == 1
+    monkeypatch.setenv("STUDYQUEST_TODAY", "2026-10-01")
     review.on_pass(p, plan, tid)
-    assert p["review"][tid]["due"] == "2026-10-02"
+    assert p["review"][tid]["box"] == 2 and p["review"][tid]["due"] == "2026-10-05"
+    monkeypatch.setenv("STUDYQUEST_TODAY", "2026-10-05")
     events = review.on_pass(p, plan, tid)
     assert tid not in p["review"] and events[0]["type"] == "graduated"
     assert p["xp"] == 5  # already done: no extra XP on graduation

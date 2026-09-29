@@ -42,7 +42,9 @@ def _task_score(p: dict, tid: str) -> float:
 
 def _confirmed(p: dict, task_ids: set[str]) -> bool:
     """A spaced rematch win on any task in the zone (Leitner card moved up or graduated)."""
-    return any(e.get("task_id") in task_ids and e["event"] in {"review_pass", "review_graduated"} for e in p["log"])
+    return any(e.get("task_id") in task_ids and (e["event"] in {"review_pass", "review_graduated"}
+                                                  or (e["event"] == "deck_answer" and e.get("correct")))
+               for e in p["log"])
 
 
 def _tier(mastery: float, confirmed: bool) -> str:

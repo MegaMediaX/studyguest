@@ -107,7 +107,7 @@ function renderRunSummary(run) {
       <h1 class="verdict-ok">Run complete</h1>
       <div class="stat-row" style="justify-content:center;text-align:center">
         <div class="stat"><span class="muted">Floors</span><b>${s.cleared}/${s.floors}</b></div>
-        <div class="stat"><span class="muted">Stars</span><b>${"★".repeat(Math.min(s.stars, 12)) || "0"}</b></div>
+        <div class="stat"><span class="muted">Stars</span><b>${s.stars}★</b></div>
         <div class="stat"><span class="muted">Time</span><b>${s.minutes}m</b></div></div>
       <p class="muted">Perks: ${run.perks.map((p) => `${p.icon} ${esc(p.name)}`).join(" · ") || "none"}</p>
       <div class="row" style="justify-content:center">
@@ -116,6 +116,8 @@ function renderRunSummary(run) {
     </section>`;
   vex("run_done", $(".victory"), true);
   FX.play("kill");
+  window.scrollTo({ top: 0 });
+  setTimeout(() => ($("#open-chest") || $("#done"))?.focus(), 0);
   if ($("#open-chest")) $("#open-chest").onclick = () => openChest();
   $("#done").onclick = () => go("quest");
 }

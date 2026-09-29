@@ -318,3 +318,14 @@ nav button { min-height: 44px; }
 .zone-node.locked .node-sub, .zone-node.locked .node-label { fill: var(--muted); }
 .btn.link, .btn.small, #exit-battle, [data-reroll] { min-height: 44px; min-width: 44px; }
 .mock-day { border-color: var(--gold); background: linear-gradient(180deg, #221c0c, var(--panel)); }
+
+/* third review */
+#toast { pointer-events: none; }
+.miss-cue { color: var(--gold); font-weight: 800; }
+.enemy-info .intent { position: static; transform: none; display: inline-block; margin: 6px 0 0; white-space: normal; }
+.hp-fill { background: linear-gradient(90deg, #9f1239, #be123c); }
+.zone-item.locked { opacity: .85; }
+.reader-body img { flex-shrink: 0; }
+@media (max-width: 820px) { #hud-title { display: none; } }
+@media (max-width: 560px) { .battle .hp span { font-size: .66rem; } }
+.victory .stat-row { flex-wrap: wrap; }

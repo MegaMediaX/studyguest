@@ -20,7 +20,7 @@ const FORMAT_HINT = {
 async function startBattle(task, mode = "task", runId = null) {
   enterFocus(); // must run inside the click's user gesture, before any await
   notePlay();
-  B.photo = null; B.aids = {}; B.keep = null; B.shownKey = null; B.battleStart = Date.now();
+  B.photo = null; B.aids = {}; B.keep = null; B.shownKey = null; B.battleStart = Date.now(); B.awayMs = 0; B.ruleTried = {};
   S.phase = "battle";
   G.saidThisBattle = 0;
   loading(task.text ? `Summoning the enemy for “${task.text}”…` : "Descending to the next floor…");
@@ -59,10 +59,10 @@ function hpBar(hp, ghost) {
 function enemyPanel(d, showIntent = true) {
   const combo = d.combo >= 2 ? `<span class="combo">🔥 x${d.combo}${d.combo >= 3 ? " CRIT ready" : ""}</span>` : "";
   const affix = d.affix ? `<span class="affix">${{ armored: "🛡️ Armored", timed: "⏳ Timed", demands_proof: "📜 Elite: demands proof" }[d.affix] || ""}</span>` : "";
-  const intent = showIntent && d.intent && B.phase === "problem" ? `<div class="intent">${d.intent.icon} ${esc(d.intent.text)}</div>` : "";
+  const intent = showIntent && d.intent && B.phase === "problem" ? `<div class="intent">${esc(d.intent.icon)} ${esc(d.intent.text)}</div>` : "";
   return `<div class="enemy">
-      <div class="monster-wrap">${intent}<div class="monster" id="monster" aria-hidden="true">${monsterFor(d.enemy)}</div></div>
-      <div class="enemy-info"><div class="enemy-name">${esc(d.enemy)} ${affix}</div>${hpBar(d.hp, d.ghost)}
+      <div class="monster-wrap"><div class="monster" id="monster" aria-hidden="true">${monsterFor(d.enemy)}</div></div>
+      <div class="enemy-info"><div class="enemy-name">${esc(d.enemy)} ${affix}</div>${hpBar(d.hp, d.ghost)}${intent}
         <div class="muted small">${esc(d.task.text)} ${d.attempt > 1 ? "· rematch" : ""} ${combo}</div>
         ${d.staggered ? `<div class="stagger">💫 Staggered! Finish the last problems: ${d.correct}/${d.need_correct} correct needed so far.</div>` : ""}</div>
       <button class="btn link" id="exit-battle" title="Leave (progress is kept)">✕</button>
@@ -125,7 +125,7 @@ function problemHtml(p) {
   const src = p.source ? `<button class="btn" id="src-link">📄 ${esc(p.source.file)} · ${esc(p.source.unit)} ${esc(p.source.n)}</button>` : "";
   const hasPhoto = B.photo?.key === key;
   return `<div class="problem">
-      <p class="eyebrow">Problem ${p.number} of ${p.total} · difficulty ${"◆".repeat(p.difficulty)}${"◇".repeat(3 - p.difficulty)} ${B.data.tries ? "· 2nd try (half damage)" : ""}
+      <p class="eyebrow">Problem ${p.number} of ${p.total} · difficulty ${"◆".repeat(p.difficulty)}${"◇".repeat(3 - p.difficulty)} ${B.data.tries ? `· <span class="miss-cue">↺ Not quite: 2nd try (half damage)</span>` : ""}
         ${B.data.timer ? `· <span id="qtimer" class="qtimer"></span>` : ""}</p>
       <div class="prompt">${esc(p.prompt)}</div>
       ${p.unverified ? `<p class="muted small">⚠ Two graders disagreed on this key, so either answer counts (but it won't count toward ★★★ or seals).</p>` : ""}
@@ -157,7 +157,8 @@ function addAid(p, html) {
   const key = pkey(p);
   (B.aids[key] = B.aids[key] || []).push(html);
   $("#hints").insertAdjacentHTML("beforeend", html);
-  $("#ans")?.focus();
+  $("#hints").lastElementChild?.scrollIntoView({ block: "nearest" });
+  $("#ans")?.focus({ preventScroll: true });
 }
 function attachPhoto(p, file) {
   if (!file || !file.type.startsWith("image/")) return toast("That's not an image");
@@ -180,7 +181,8 @@ function bindProblem(p) {
   if ($("#hint-btn")) $("#hint-btn").onclick = () => takeHint(p);
   if ($("#rule-btn")) $("#rule-btn").onclick = () => showRule(p);
   // a rule already paid for (e.g. before a reload) is shown again at no extra cost
-  if (B.data.rule_used && !(B.aids[pkey(p)] || []).some((h) => h.includes("helpbox rule"))) showRule(p);
+  B.ruleTried = B.ruleTried || {};
+  if (B.data.rule_used && !B.ruleTried[pkey(p)]) { B.ruleTried[pkey(p)] = true; showRule(p); }
   $("#scroll-link").onclick = () => { B.phase = "lesson"; markLesson(); renderBattle(); $("#fight").textContent = "⚔️ Back to the fight"; };
   for (const [id, kind] of [["#tok-retry", "retry_token"], ["#tok-hint", "hint_token"]]) {
     if ($(id)) $(id).onclick = async () => {
@@ -299,6 +301,8 @@ function bindDispute(p) {
 }
 
 async function showRule(p) {
+  B.ruleTried = B.ruleTried || {};
+  B.ruleTried[pkey(p)] = true;
   const btn = $("#rule-btn"); if (btn) btn.disabled = true;
   try {
     const r = await api("/api/battle/rule", { json: { task_id: B.data.task.id, idx: p.idx } });
@@ -330,7 +334,8 @@ async function explainDifferently(p) {
 // ---------- outcome ----------
 function renderOutcome(r) {
   exitFocus();
-  LS.set("activeMs", LS.get("activeMs", 0) + (Date.now() - (B.battleStart || Date.now())));
+  window.scrollTo({ top: 0 });
+  LS.set("activeMs", LS.get("activeMs", 0) + Math.max(0, Date.now() - (B.battleStart || Date.now()) - (B.awayMs || 0)));
   S.phase = "card";
   const d = B.data;
   if (r.outcome === "won") {
@@ -455,7 +460,7 @@ document.addEventListener("visibilitychange", () => {
   if (S.phase !== "battle" || !B.data) return;
   if (document.hidden) { B.left = Date.now(); return; }
   if (!B.left) return;
-  const away = Math.round((Date.now() - B.left) / 1000); B.left = null;
+  const away = Math.round((Date.now() - B.left) / 1000); B.awayMs = (B.awayMs || 0) + (Date.now() - B.left); B.left = null;
   if (away < 3) return;
   G.saidThisBattle = 0;
   api("/api/battle/focus", { json: { task_id: B.data.task.id } }).catch(() => {});

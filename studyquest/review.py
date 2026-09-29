@@ -12,39 +12,51 @@ INTERVALS = [1, 2, 4]  # days until the next review after landing in box 0, 1, 2
 ROUND_SIZE = 5
 
 
-def _due(days: int, plan: dict | None = None, tid: str | None = None) -> str:
-    """today + days, but no later than the day before this task's course exam (when that's still ahead)."""
+def _due(days: int, plan: dict | None = None, tid: str | None = None, course: str | None = None) -> str:
+    """today + days, pulled in before the course's next exam: aim for exam-2 (the eve stays light), never later
+    than exam-1, and never "again today" while a later pre-exam day exists."""
     today = store.today()
     due = today + timedelta(days=days)
-    cap = _exam_cap(plan, tid) if plan and tid else None
-    if cap and due > cap:
-        due = max(cap, today)
-    return due.isoformat()
+    course = course or (_course_of(plan, tid) if plan and tid else None)
+    exam = _next_exam_day(course)
+    if exam:
+        latest = exam - timedelta(days=1)
+        cap = max(exam - timedelta(days=2), today + timedelta(days=1)) if today + timedelta(days=1) <= latest else latest
+        due = min(due, cap)
+    return max(due, today).isoformat()
 
 
-def _exam_cap(plan: dict, tid: str):
+def _course_of(plan: dict, tid: str) -> str | None:
     from .corpus import course_for_subject
-    from .quest import exams_countdown
     try:
         session, _ = progress.find_task(plan, tid)
     except KeyError:
         return None
-    course = course_for_subject(session["subject"])
-    exam = next((e for e in exams_countdown() if e["course"] == course and e["days"] >= 1), None)
-    if not exam:
+    return course_for_subject(session["subject"])
+
+
+def _next_exam_day(course: str | None):
+    from .quest import exams_countdown
+    if not course:
         return None
-    exam_day = date.fromisoformat(exam["date"])
-    # aim for exam−2 so the eve stays light; never later than exam−1
-    return max(exam_day - timedelta(days=2), min(store.today(), exam_day - timedelta(days=1)))
+    exam = next((e for e in exams_countdown() if e["course"] == course and e["days"] >= 1), None)
+    return date.fromisoformat(exam["date"]) if exam else None
+
+
+def _exam_days(course: str | None) -> int:
+    day = _next_exam_day(course)
+    return (day - store.today()).days if day else 999
 
 
 def schedule(p: dict, plan: dict, tid: str, stars: int = 1) -> list[dict]:
-    """A shaky win (1★) enters spaced review; clean wins don't (their missed problems are in the deck anyway).
-    Keeps the daily review load realistic before the exam."""
-    if tid in p["review"] or stars >= 2:
+    """Every win gets one spaced check, sized to how shaky it was: a 1★ win starts at box 0 (back tomorrow),
+    a ★★/★★★ win gets a single confirmation card at the last box (one recall in ~4 days graduates it and can
+    seal the zone). Clean play is never a dead end, and the load stays small."""
+    if tid in p["review"]:
         return []
     session, _ = progress.find_task(plan, tid)
-    p["review"][tid] = {"box": 0, "due": _due(INTERVALS[0], plan, tid), "topic": session["session"],
+    box = 0 if stars <= 1 else len(INTERVALS) - 1
+    p["review"][tid] = {"box": box, "due": _due(INTERVALS[box], plan, tid), "topic": session["session"],
                         "subject": session["subject"], "lapses": 0}
     progress.log(p, "review_add", tid, due=p["review"][tid]["due"], why="won")
     return [{"type": "review_scheduled", "due": p["review"][tid]["due"]}]
@@ -67,6 +79,11 @@ def on_pass(p: dict, plan: dict, tid: str) -> list[dict]:
     card = p["review"].get(tid)
     if not card:
         return progress.record_pass(p, plan, tid, first_try=False)
+    today = store.today().isoformat()
+    if card.get("last_pass") == today:  # no same-day box jumps (that's massed, not spaced, practice)
+        card["due"] = _due(INTERVALS[card["box"]], plan, tid)
+        return [{"type": "review_up", "box": card["box"], "due": card["due"]}]
+    card["last_pass"] = today
     card["box"] += 1
     if card["box"] >= len(INTERVALS):
         p["review"].pop(tid)
@@ -189,17 +206,27 @@ def add_problem_card(p: dict, enc: dict, prob: dict) -> list[dict]:
     topic = prob.get("from_topic") or (progress.find_task(plan, tid)[0]["session"] if tid else "Mixed")
     keep = {k: prob.get(k) for k in ("type", "prompt", "answer", "choices", "explain", "hints", "rule", "traps",
                                      "alt_answers")}
-    deck[pid] = {"id": pid, "task_id": tid, "topic": topic, "problem": keep, "box": 0,
-                 "due": _due(INTERVALS[0], plan, tid) if tid else _due(INTERVALS[0]), "lapses":
-                     deck.get(pid, {}).get("lapses", 0) + 1, "added": store.now_iso()}
+    course = _course_of(plan, tid) if tid else _course_of_topic(plan, topic)
+    deck[pid] = {"id": pid, "task_id": tid, "topic": topic, "course": course, "problem": keep, "box": 0,
+                 "due": _due(INTERVALS[0], course=course), "lapses": deck.get(pid, {}).get("lapses", 0) + 1,
+                 "added": store.now_iso()}
     return [{"type": "problem_card", "due": deck[pid]["due"]}]
 
 
+def _course_of_topic(plan: dict, topic: str) -> str | None:
+    from .corpus import course_for_subject
+    s = next((s for s in plan["sessions"] if s["session"] == topic), None)
+    return course_for_subject(s["subject"]) if s else None
+
+
 def due_problem_cards(p: dict) -> list[dict]:
+    """Nearest exam's course first, newest misses first (they're the freshest gaps), within the daily budget."""
     today = store.today().isoformat()
     done_today = sum(1 for e in p.get("log", []) if e["event"] == "deck_answer" and e["at"][:10] == today)
     budget = max(0, DECK_DAILY - done_today)
-    cards = sorted((c for c in p.get("problem_cards", {}).values() if c["due"] <= today), key=lambda c: c["due"])
+    cards = [c for c in p.get("problem_cards", {}).values() if c["due"] <= today]
+    cards.sort(key=lambda c: c.get("added", ""), reverse=True)
+    cards.sort(key=lambda c: _exam_days(c.get("course")))
     mixed = interleave([{**c, "task_id": c["id"]} for c in cards[:budget]],
                        seed=int(store.today().strftime("%Y%m%d")))
     return mixed[:min(PROBLEM_ROUND, budget)]
@@ -215,11 +242,13 @@ def _order_for(c: dict) -> list[int]:
 
 def public_card(c: dict) -> dict:
     q = c["problem"]
-    choices = q.get("choices")
+    choices, ids = q.get("choices"), None
     if q["type"] == "mcq" and choices:
-        choices = [choices[i] for i in _order_for(c)]
+        ids = _order_for(c)
+        choices = [choices[i] for i in ids]
+    # the client answers with the ORIGINAL index (choice_ids), so grading never depends on re-shuffling later
     return {"id": c["id"], "topic": c["topic"], "box": c["box"], "type": q["type"], "prompt": q["prompt"],
-            "choices": choices, "rule": q.get("rule") or ""}
+            "choices": choices, "choice_ids": ids, "rule": q.get("rule") or ""}
 
 
 def answer_problem_card(pid: str, text: str) -> dict:
@@ -229,11 +258,6 @@ def answer_problem_card(pid: str, text: str) -> dict:
     if not card:
         raise KeyError("That card isn't in your deck.")
     q = card["problem"]
-    if q["type"] == "mcq" and q.get("choices"):
-        pick = mathcheck._choice_index(str(text), q["choices"])
-        if pick is None:
-            return {"result": "unreadable", "feedback": "Pick A–D. (No attempt used.)"}
-        text = str(_order_for(card)[pick] + 1)  # shown position → original choice
     if q["type"] in keycheck.CHECKABLE:
         if not mathcheck.readable(q["type"], text, q.get("choices"), q["answer"]):
             return {"result": "unreadable", "feedback": "Couldn't read that. (No attempt used.)"}
@@ -248,17 +272,20 @@ def answer_problem_card(pid: str, text: str) -> dict:
         if not c:
             raise KeyError("That card isn't in your deck.")
         events = []
-        if correct:
+        today = store.today().isoformat()
+        if correct and c.get("last_pass") == today:  # right again today: fine, but no same-day box jump
+            events = progress.add_xp(p, 1, "deck recall")
+        elif correct:
+            c["last_pass"] = today
             c["box"] += 1
             events = progress.add_xp(p, 1, "deck recall")
             if c["box"] >= len(INTERVALS):
                 p["problem_cards"].pop(pid)
                 events.append({"type": "card_graduated"})
             else:
-                c["due"] = _due(INTERVALS[c["box"]], plan, c["task_id"]) if c["task_id"] else _due(INTERVALS[c["box"]])
+                c["due"] = _due(INTERVALS[c["box"]], plan, c["task_id"], c.get("course"))
         else:
-            c.update(box=0, due=_due(INTERVALS[0], plan, c["task_id"]) if c["task_id"] else _due(INTERVALS[0]),
-                     lapses=c.get("lapses", 0) + 1)
+            c.update(box=0, due=_due(INTERVALS[0], plan, c["task_id"], c.get("course")), lapses=c.get("lapses", 0) + 1)
         progress.log(p, "deck_answer", c["task_id"] if c else None, correct=correct)
     answer = f"{'abcdef'[int(q['answer'])]}) {q['choices'][int(q['answer'])]}" if q["type"] == "mcq" else str(q["answer"])
     return {"result": "right" if correct else "wrong", "feedback": why, "answer": answer, "explain": q.get("explain", ""),

@@ -97,7 +97,7 @@ function go(view) {
 async function loadToday() { S.today = await api("/api/today"); renderHud(S.today); return S.today; }
 function currentTask() {
   const tasks = S.today?.session?.tasks || [];
-  if (S.taskIndex == null || S.taskIndex >= tasks.length || tasks[S.taskIndex].status === "done") {
+  if (S.taskIndex == null || S.taskIndex < 0 || S.taskIndex >= tasks.length || tasks[S.taskIndex].status === "done") {
     const i = tasks.findIndex((t) => t.status === "todo");
     S.taskIndex = i >= 0 ? i : tasks.findIndex((t) => t.status === "review");
   }
@@ -131,8 +131,8 @@ async function renderQuest() {
   G.run = runState.run;
   const runBtn = G.run ? `<button class="btn primary big" id="run">${G.run.offer?.length ? "🎁 Choose your perk" : `▶ Continue run · floor ${G.run.floor + 1}/${G.run.floors}`}</button>`
     : `<button class="btn primary big" id="run">▶ Start a run <span class="small">(up to 4 floors, perks, a chest)</span></button>`;
-  const mock = t.mock_today ? `<section class="card mock-day"><h2>📄 Mock exam day ${t.mock_today.number}/2</h2>
-      <p>Take the ${esc(t.mock_today.name)}: ${t.mock_today.minutes} minutes, closed book, full working on paper. It's the best predictor of Exam I.</p>
+  const mock = t.mock_today ? `<section class="card mock-day" role="region" aria-label="Mock exam reminder"><h2>📄 Mock exam day ${esc(t.mock_today.number)}/2</h2>
+      <p>Take the ${esc(t.mock_today.name)}: ${esc(t.mock_today.minutes)} minutes, closed book, full working on paper. It's the best predictor of Exam I.</p>
       <div class="row"><button class="btn primary big" id="mock-go">Start the timed mock</button></div></section>` : "";
   app.innerHTML = `
     ${mock}${riftBanner(t.rift)}
@@ -401,7 +401,7 @@ function renderDeck(r) {
     if (i >= r.problems.length) { toast("Deck round done ✅"); return renderReview(); }
     const c = r.problems[i];
     const input = c.type === "mcq"
-      ? `<div class="choices">${c.choices.map((x, k) => `<button class="btn choice" data-k="${k + 1}"><b>${"ABCDEF"[k]}</b> ${esc(x)}</button>`).join("")}</div>`
+      ? `<div class="choices">${c.choices.map((x, k) => `<button class="btn choice" data-k="${(c.choice_ids ? c.choice_ids[k] : k) + 1}"><b>${"ABCDEF"[k]}</b> ${esc(x)}</button>`).join("")}</div>`
       : `<input type="text" id="deck-ans" autocomplete="off" aria-label="Your answer">`;
     app.innerHTML = `<section class="card"><p class="eyebrow">Missed problems · ${i + 1} of ${r.problems.length} · box ${c.box + 1}/3</p>
       <p class="muted">${esc(c.topic)}</p><div class="prompt">${esc(c.prompt)}</div>${input}
