@@ -56,6 +56,8 @@ it runs the app, answers the `/quest-*` commands, and tutors. Gemini (`agy -p`) 
 5. Questions must cite file + page/slide from the provided sources; invalid citations are dropped.
    If a named file is scanned without OCR text, say so. Don't guess its content.
 6. Hints and "stuck" steps: max 3 sentences. Explanations: max 5.
+   Exception: "Every step" (`/api/battle/steps` → `encounter.steps`), shown once the worked solution is visible:
+   one rewrite per step with the rule used; its final step must match the key (`keycheck.matches`) or it isn't shown.
 7. `ai.py` runs the CLIs in a temp cwd with `disableAllHooks`, so app calls never trigger the
    SessionEnd work-log hook. Keep it that way.
 8. Show one session at a time; only show the full plan when asked.
@@ -71,6 +73,8 @@ it runs the app, answers the `/quest-*` commands, and tutors. Gemini (`agy -p`) 
    first wrong step and must never reveal the answer. MATH202: one problem per battle is "exam-style"
    (`work_required`): a typed answer without a photo gets a prompt, or half damage if sent anyway.
    Every non-clean problem enters the per-problem review deck (`review.add_problem_card`).
+   Typed answers get a math keypad and a live "reads as" line (`/api/battle/preview` → `mathcheck.preview`):
+   it shows how the grader parsed the input, never the key, and costs nothing.
    Known wrong answers ("traps") get targeted feedback. Rule costs 25% (same as a nudge).
    Answer kinds: mcq, numeric (incl. DNE/∞), expression, multi (points/vectors, <a,b>, i/j/k), equation (planes,
    any equivalent form), line (parametric, any point/parallel direction), set (unordered points), classify

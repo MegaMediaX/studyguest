@@ -306,6 +306,17 @@ def api_battle_answer(body: BattleAnswer):
     return encounter.answer(body.task_id, body.idx, body.answer, no_work=body.no_work)
 
 
+class BattlePreview(BaseModel):
+    task_id: str
+    idx: int = Field(ge=0, le=20)
+    answer: str = Field(max_length=500)
+
+
+@app.post("/api/battle/preview")
+def api_battle_preview(body: BattlePreview):
+    return encounter.preview(body.task_id, body.idx, body.answer)
+
+
 @app.post("/api/battle/answer_photo")
 async def api_battle_answer_photo(task_id: str = Form(..., max_length=40), idx: int = Form(..., ge=0, le=20),
                                   answer: str = Form("", max_length=500), photo: UploadFile = File(...)):
@@ -328,6 +339,11 @@ class BattleRef(BaseModel):
 @app.post("/api/battle/hint")
 def api_battle_hint(body: BattleRef):
     return encounter.hint(body.task_id, body.idx)
+
+
+@app.post("/api/battle/steps")
+def api_battle_steps(body: BattleRef):
+    return encounter.steps(body.task_id, body.idx)
 
 
 @app.post("/api/battle/rule")

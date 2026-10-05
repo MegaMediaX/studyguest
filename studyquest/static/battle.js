@@ -117,6 +117,63 @@ function bindLesson(d) {
 }
 
 // ---------- problem ----------
+// Math keypad: [label, text to insert, caret offset from the end]. "set" replaces the whole box (classify).
+const KEYS_MATH = [["√", "√()", -1], ["x²", "^2", 0], ["xⁿ", "^()", -1], ["π", "π", 0], ["eˣ", "e^()", -1],
+  ["ln", "ln()", -1], ["( )", "()", -1], ["÷", "/", 0]];
+const KEYS = {
+  numeric: [...KEYS_MATH, ["∞", "∞", 0], ["DNE", "DNE", 0]],
+  expression: [...KEYS_MATH, ["sin", "sin()", -1], ["cos", "cos()", -1], ["θ", "θ", 0]],
+  multi: [["( , )", "(, )", -3], ["⟨ , ⟩", "<, >", -3], ["i", "i", 0], ["j", "j", 0], ["k", "k", 0], ...KEYS_MATH],
+  direction: [["( , )", "(, )", -3], ["i", "i", 0], ["j", "j", 0], ...KEYS_MATH],
+  equation: [["=", " = ", 0], ...KEYS_MATH],
+  line: [["( , , )", "(, , )", -5], ["t", "t", 0], ...KEYS_MATH],
+  set: [["( , )", "(, )", -3], ["next point", ", ", 0], ...KEYS_MATH],
+  classify: ["local max", "local min", "absolute max", "absolute min", "saddle", "inconclusive"].map((w) => [w, w, "set"]),
+};
+function keypadHtml(type) {
+  const keys = KEYS[type]; if (!keys) return "";
+  return `<div class="keypad" role="group" aria-label="Math keys">${keys.map(([l, ins, off], i) =>
+    `<button type="button" class="key" data-k="${i}" title="Insert ${esc(ins.trim() || l)}">${esc(l)}</button>`).join("")}</div>`;
+}
+function bindKeypad(p, ans) {
+  const keys = KEYS[p.type]; if (!keys || !ans) return;
+  document.querySelectorAll(".keypad .key").forEach((b) => {
+    b.onmousedown = (e) => e.preventDefault(); // keep the caret in the answer box
+    b.onclick = () => {
+      const [, ins, off] = keys[+b.dataset.k];
+      if (off === "set") { ans.value = ins; }
+      else {
+        const a = ans.selectionStart ?? ans.value.length, z = ans.selectionEnd ?? a;
+        const sel = ans.value.slice(a, z);
+        // wrap a selection: select "x+1", press √ -> √(x+1)
+        const text = sel && ins.endsWith("()") ? ins.slice(0, -1) + sel + ")" : ins;
+        ans.value = ans.value.slice(0, a) + text + ans.value.slice(z);
+        const caret = a + text.length + (sel ? 0 : off);
+        ans.setSelectionRange(caret, caret);
+      }
+      ans.focus(); ans.dispatchEvent(new Event("input"));
+    };
+  });
+}
+// Live "reads as": the server's own parser shows how the answer will be understood before you attack.
+function bindPreview(p, ans) {
+  const fmt = $("#fmt"); if (!fmt || !ans) return;
+  let timer = null, seq = 0;
+  const show = async () => {
+    const text = ans.value.trim(), mine = ++seq;
+    if (!text) { fmt.className = "fmt"; fmt.textContent = FORMAT_HINT[p.type]; return; }
+    try {
+      const r = await api("/api/battle/preview", { json: { task_id: B.data.task.id, idx: p.idx, answer: text } });
+      if (mine !== seq) return; // a newer keystroke won
+      fmt.className = `fmt read ${r.ok ? "ok" : "bad"}`;
+      fmt.innerHTML = r.ok
+        ? `Reads as: <b>${mathHtml(r.read)}</b>${r.approx ? ` <span class="muted">${esc(r.approx)}</span>` : ""} ✓`
+        : `⚠ ${r.need ? `${esc(r.need)} Use DNE or ∞ for a single part when needed.` : `Can't read this yet${r.read ? ` (got <b>${mathHtml(r.read)}</b>)` : ""}. ${esc(FORMAT_HINT[p.type])}`}`;
+    } catch { /* preview is a convenience; grading still works */ }
+  };
+  ans.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(show, 200); });
+  if (ans.value.trim()) show();
+}
 function problemHtml(p) {
   if (!p) return "";
   const key = pkey(p);
@@ -126,7 +183,8 @@ function problemHtml(p) {
     : p.type === "short"
       ? `<textarea id="ans" aria-label="Your answer" placeholder="${esc(FORMAT_HINT.short)}">${esc(kept)}</textarea>`
       : `<input type="text" id="ans" autocomplete="off" spellcheck="false" aria-label="Your answer" aria-describedby="fmt" value="${esc(kept)}">
-         <p class="fmt" id="fmt">${esc(FORMAT_HINT[p.type])}</p>`;
+         ${keypadHtml(p.type)}
+         <p class="fmt" id="fmt" aria-live="polite">${esc(FORMAT_HINT[p.type])}</p>`;
   const src = p.source ? `<button class="btn" id="src-link">📄 ${esc(p.source.file)} · ${esc(p.source.unit)} ${esc(p.source.n)}</button>` : "";
   const hasPhoto = B.photo?.key === key;
   return `<div class="problem">
@@ -182,6 +240,7 @@ function bindProblem(p) {
   const ans = $("#ans");
   if (ans) { ans.focus(); if (B.keep?.key === pkey(p)) ans.select(); ans.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitAnswer(ans.value); } }; }
   if ($("#attack")) $("#attack").onclick = () => submitAnswer(ans.value);
+  if (ans && ans.tagName === "INPUT") { bindKeypad(p, ans); bindPreview(p, ans); }
   document.querySelectorAll(".choice").forEach((b) => (b.onclick = () => submitAnswer(b.dataset.i === undefined ? "" : String(+b.dataset.i + 1))));
   if ($("#hint-btn")) $("#hint-btn").onclick = () => takeHint(p);
   if ($("#rule-btn")) $("#rule-btn").onclick = () => showRule(p);
@@ -274,6 +333,7 @@ function handleHit(r, p) {
   const reveal = r.reveal ? `<div class="reveal"><p class="eyebrow">${r.result === "hit" ? "Why it's right" : "The answer"}</p>
       <p><b>${mathHtml(r.reveal.answer)}</b>${r.reveal.alt?.length ? ` <span class="muted small">(also accepted: ${r.reveal.alt.map(mathHtml).join(", ")})</span>` : ""}</p>${r.reveal.explain ? `<p>${mathHtml(r.reveal.explain)}</p>` : ""}
       ${r.reveal.solution ? `<details><summary>Worked solution</summary><p class="pre">${mathHtml(r.reveal.solution)}</p></details>` : ""}
+      <div class="steps-box" data-idx="${p.idx}">${r.reveal.solution ? `<p class="muted small">Writing out every step with its rule…</p>` : `<button class="btn link" id="steps-btn">📖 Show every step</button>`}</div>
       ${r.result === "fail" ? disputeBtn() : ""}</div>` : "";
   const next = r.outcome ? `<button class="btn primary big" id="next">${r.outcome === "won" ? "🏆 Claim victory" : "Continue"}</button>`
     : `<button class="btn primary big" id="next">Next ⏎</button>`;
@@ -288,8 +348,28 @@ function handleHit(r, p) {
   if (r.result === "hit") { floatDamage(`−${r.damage}`, r.crit ? "crit" : "hit"); $("#monster").classList.add("shake"); }
   if (r.crit && !B.critSaid) { B.critSaid = true; vex("first_crit", $(".battle")); }
   if (r.result === "fail") bindDispute(p);
+  const box = $(".steps-box");
+  if (box) { if (r.reveal?.solution) loadSteps(p, box); else $("#steps-btn").onclick = () => loadSteps(p, box); }
   const go_on = () => { B.qStart = Date.now(); return r.outcome ? renderOutcome(r) : renderBattle(); };
   $("#next").onclick = go_on; $("#next").focus();
+}
+
+// Every rewrite with the rule behind it (server checks the last step equals the key).
+function stepsHtml(steps) {
+  return `<p class="eyebrow">Every step</p><ol class="steps">${steps.map((st) =>
+    `<li><span class="step-math">${mathHtml(st.math)}</span>${st.rule ? `<span class="step-rule">${mathHtml(st.rule)}</span>` : ""}</li>`).join("")}</ol>`;
+}
+async function loadSteps(p, box) {
+  box.innerHTML = `<p class="muted small">Writing out every step with its rule… (about 15 s)</p>`;
+  try {
+    const r = await api("/api/battle/steps", { json: { task_id: B.data.task.id, idx: p.idx } });
+    if (box.isConnected) box.innerHTML = stepsHtml(r.steps);
+    // a steps box inside a hint is part of the saved aids: keep it when the problem re-renders
+    if (box.closest("#hints")) B.aids[pkey(p)] = [...$("#hints").children].map((n) => n.outerHTML);
+  } catch (e) {
+    if (box.isConnected) box.innerHTML = `<p class="muted small">${esc(e.message)} <button class="btn link" id="steps-retry">Try again</button></p>`;
+    const b = box.querySelector("#steps-retry"); if (b) b.onclick = () => loadSteps(p, box);
+  }
 }
 
 function disputeBtn() { return `<button class="btn link" id="dispute">I think I'm right</button>`; }
@@ -323,7 +403,8 @@ async function takeHint(p) {
     vex("hint_used", $(".battle"));
     B.data.hint_level = r.hint_level; B.data.combo = 0;
     const label = r.free ? "Free hint" : ["", "Nudge (−25% dmg)", "Next step (−50% dmg)", "Worked solution (doesn't count toward the win, but now you've seen it)"][r.hint_level];
-    addAid(p, `<div class="helpbox"><b>💡 ${label}</b><p class="pre">${mathHtml(r.hint)}</p></div>`);
+    addAid(p, `<div class="helpbox"><b>💡 ${label}</b><p class="pre">${mathHtml(r.hint)}</p>${r.last ? `<div class="steps-box"></div>` : ""}</div>`);
+    if (r.last) { const boxes = document.querySelectorAll("#hints .steps-box"); loadSteps(p, boxes[boxes.length - 1]); }
     $("#hint-btn").innerHTML = `💡 Hint <span class="muted small">(${p.hints_available - r.hint_level} left)</span>`;
   } catch (e) { showError(e, $(".battle")); }
 }

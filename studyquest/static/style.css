@@ -260,6 +260,15 @@ details.more > summary::before { content: "▸ "; } details.more[open] > summary
 details.more .row { margin-top: 8px; }
 .stagger { color: var(--gold); font-weight: 700; font-size: .85rem; margin-top: 4px; }
 .fmt { color: var(--muted); font-size: .85rem; margin: 6px 2px 0; }
+.fmt.read.ok { color: var(--text, inherit); }
+.fmt.read.ok b { color: var(--accent); }
+.fmt.read.bad { color: var(--warn, #d29922); }
+.keypad { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.keypad .key { min-width: 44px; min-height: 40px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--panel); color: inherit; font: inherit; font-size: .95rem; cursor: pointer; }
+.keypad .key:hover { border-color: var(--accent, #58a6ff); }
+.keypad .key:focus-visible { outline: 2px solid var(--accent, #58a6ff); outline-offset: 2px; }
+.keypad .key:active { transform: scale(.96); }
 #fx { scroll-margin-bottom: 24px; }
 /* mastery tiles: readable text, the score as a bar + number */
 .heat .heat-tile { background: var(--bg); border: 1px solid var(--line); position: relative; padding-bottom: 16px; }
@@ -333,3 +342,10 @@ nav button { min-height: 44px; }
 /* calculus review */
 .exam-focus { border-color: var(--accent); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 10%, var(--panel)), var(--panel)); }
 sup { font-size: .72em; line-height: 0; } sub { font-size: .72em; line-height: 0; }
+
+.steps-box { margin-top: 10px; }
+.steps { margin: 6px 0 0; padding-left: 1.6em; display: grid; gap: 8px; }
+.steps li { line-height: 1.45; }
+.steps .step-math { display: block; font-weight: 600; }
+.steps .step-rule { display: block; color: var(--muted); font-size: .85rem; }
+.steps .step-rule::before { content: "↳ "; color: var(--accent); }

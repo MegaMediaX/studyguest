@@ -28,6 +28,7 @@ class FakeAI:
         self.gemini_score = None  # set to force a Gemini disagreement
         self.key_answers = None   # Gemini's blind answers for keycheck
         self.work = None          # what the marker "sees" in a photo of working
+        self.step_finals = None   # successive 'final' values for step-by-step solutions
 
     def __call__(self, provider, prompt, images):
         self.calls.append((provider, prompt[:80]))
@@ -58,6 +59,11 @@ class FakeAI:
             return json.dumps({"readable": w.get("readable", True), "final_answer": w.get("final_answer", ""),
                                "final_correct": w.get("final_correct", True), "method_ok": w.get("method_ok", True),
                                "feedback": w.get("feedback", "Line 2: check the sign.")})
+        if prompt.startswith("Write a complete step-by-step"):
+            key = re.search(r"your last step must reach exactly this\): (.*)\n", prompt).group(1)
+            final = self.step_finals.pop(0) if self.step_finals else key
+            return json.dumps({"steps": [{"math": "f = ln √u", "rule": "given"},
+                                         {"math": "f = ½ ln u", "rule": "ln(a^p) = p·ln a"}], "final": final})
         if prompt.startswith("State the general rule"):
             return json.dumps({"rule": "D_u f = ∇f · u (u a unit vector)"})
         if prompt.startswith("Solve each problem independently"):

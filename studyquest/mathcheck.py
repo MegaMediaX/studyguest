@@ -73,6 +73,7 @@ def normalize(text: str) -> str:
     s = str(text).strip().lower()
     if len(s) > MAX_LEN:
         raise NotMath("too long")
+    s = re.sub(r"\b(sin|cos|tan)\s*\^\s*\(?\s*[-−]\s*1\s*\)?", r"arc\1", s)  # tan^-1 -> arctan
     s = _strip_lhs(_functions(_latex(s)))
     repl = {"√": "sqrt", "π": "pi", "θ": "theta", "φ": "phi", "ϕ": "phi", "ρ": "rho", "λ": "lam", "μ": "mu",
             "×": "*", "·": "*", "⋅": "*", "÷": "/", "−": "-", "–": "-", "^": "**", "²": "**2", "³": "**3",
@@ -124,9 +125,13 @@ def _eval(node, env: dict):
 def parse(text: str):
     s = _implicit_names(normalize(text))
     try:
-        return ast.parse(s, mode="eval")
+        tree = ast.parse(s, mode="eval")
     except SyntaxError as e:
         raise NotMath(f"can't read “{text}”") from e
+    called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+    if any(isinstance(n, ast.Name) and n.id in FUNCS and id(n) not in called for n in ast.walk(tree)):
+        raise NotMath("a function without its argument, e.g. √ instead of √(2)")
+    return tree
 
 
 def free_vars(tree) -> set[str]:
@@ -245,6 +250,8 @@ def check(kind: str, student: str, key, choices: list | None = None, tolerance: 
         return same_number(student, str(key), tolerance)
     if kind == "expression":
         return same_expression(student, str(key))
+    if kind == "multi" and _many_points(str(key)):
+        kind = "set"
     if kind == "multi":  # ordered tuple of numbers/expressions, e.g. a point or a vector
         s, k = split_multi(student), split_multi(str(key))
         return len(s) == len(k) and all(same_number(a, b, tolerance) or same_expression(a, b) for a, b in zip(s, k))
@@ -413,12 +420,19 @@ def _single(text: str):
     return tree
 
 
+def _many_points(key: str) -> bool:
+    """A 'multi' key like '(1, -2), (-1, -2)' is a list of points: order shouldn't matter."""
+    return len(re.findall(r"[(<⟨][^()<>⟨⟩]*[)>⟩]", key)) >= 2
+
+
 def readable(kind: str, student: str, choices: list | None = None, key=None) -> bool:
     """Can we even read this answer? Unreadable input must not cost an attempt.
     Words like "idk" or "two" parse as variable names, so free variables are checked against the key."""
     student = str(student or "").strip()
     if not student:
         return False
+    if kind == "multi" and key is not None and _many_points(str(key)):
+        kind = "set"
     try:
         if kind == "mcq":
             return _choice_index(student, choices or []) is not None
@@ -455,3 +469,67 @@ def readable(kind: str, student: str, choices: list | None = None, key=None) -> 
     except NotMath:
         return False
     return True
+
+
+_PRETTY = ((" ** ", "^"), (" * ", "·"), ("sqrt", "√"), ("pi", "π"), ("theta", "θ"), ("phi", "φ"), ("rho", "ρ"),
+           ("lam", "λ"), ("mu", "μ"))
+
+
+def pretty(text: str) -> str:
+    """How the grader reads one value: '2xy + y^2' -> '2·x·y + y^2'; 'e^xy' -> 'e^x·y' (shows the slip)."""
+    s = ast.unparse(_single(text))
+    for a, b in _PRETTY:
+        s = s.replace(a, b)
+    s = re.sub(r"\bdne\b", "DNE", re.sub(r"\binf\b", "∞", s))
+    return re.sub(r"(?<![\^\d.])(\d+(?:\.\d+)?)·([a-zα-ω√(])", r"\1\2", s)  # 2·x -> 2x, not x^2·ln(x)
+
+
+def _approx(text: str) -> str | None:
+    try:
+        v = value(text)
+    except (NotMath, ArithmeticError, ValueError, TypeError):
+        return None
+    return None if abs(v - round(v)) < 1e-9 else f"≈ {v:.4g}"
+
+
+def _tuple(parts: list[str]) -> str:
+    return "(" + ", ".join(pretty(p) for p in parts) + ")"
+
+
+def preview(kind: str, student: str, choices: list | None = None, key=None) -> dict:
+    """Live 'reads as' line for the answer box: never reveals the key, only how the input was parsed."""
+    student = str(student or "").strip()
+    if kind == "multi" and key is not None and _many_points(str(key)):
+        kind = "set"
+    ok = readable(kind, student, choices, key)
+    read, approx = "", None
+    try:
+        if kind == "numeric":
+            sp = special(student)
+            if sp:
+                read = {"dne": "DNE", "inf": "∞", "-inf": "−∞"}.get(sp, sp)
+            else:
+                student = re.sub(r"^(-?\d+),(\d+)$", r"\1.\2", student)
+                read, approx = pretty(student), _approx(student)
+        elif kind == "expression":
+            read = pretty(student)
+        elif kind in {"multi", "direction"}:
+            read = _tuple(split_multi(student))
+        elif kind == "line":
+            read = _tuple(_line_parts(student))
+        elif kind == "equation":
+            lhs, rhs = student.split("=")
+            read = f"{pretty(lhs)} = {pretty(rhs)}"
+        elif kind == "set":
+            pts = split_points(student)
+            read = ", ".join(_tuple(split_multi(p)) if p.startswith(("(", "<", "⟨")) else pretty(p) for p in pts)
+        elif kind == "classify":
+            read = classify_label(student) or ""
+    except (NotMath, ValueError):
+        ok = False
+    need = None
+    if kind in {"multi", "direction"} and key is not None and not ok:
+        want, got = len(split_multi(str(key))), len(split_multi(student)) if student else 0
+        if want != got:  # the prompt already says how many values; this only counts them
+            need = f"This needs {want} values in the order asked, separated by commas (you gave {got})."
+    return {"ok": ok and bool(read), "read": read, "approx": approx, "need": need}

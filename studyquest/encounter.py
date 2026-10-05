@@ -398,6 +398,18 @@ FORMAT_HELP = {"mcq": "Pick A–D (or 1–4).", "numeric": "Type a number, e.g. 
                "direction": "Type a vector, e.g. (3, -4) (any positive multiple counts)."}
 
 
+ACTIVE_CAP = 15 * 60  # seconds one problem can add to a battle's study time
+
+
+def preview(task_id: str, idx: int, text: str) -> dict:
+    """How the grader will read the typed answer (live, before attacking). Never reveals the key."""
+    enc = _active(progress.load(), task_id)
+    prob = enc["problems"][idx] if 0 <= idx < len(enc["problems"]) else None
+    if not prob or prob["type"] not in LOCAL_KINDS - {"mcq"}:
+        return {"ok": False, "read": "", "approx": None}
+    return mathcheck.preview(prob["type"], text, prob.get("choices"), prob["answer"])
+
+
 def answer(task_id: str, idx: int, text: str, photo: str | None = None, no_work: bool = False) -> dict:
     enc = _active(progress.load(), task_id)
     if enc["current"] != idx:
@@ -618,6 +630,8 @@ def _answer_text(prob: dict) -> str:
 
 def _advance(enc: dict) -> None:
     """Adaptive order: on a combo take the hardest left, after a miss the easiest; proofs come last."""
+    # active time only: a problem left open overnight counts at most ACTIVE_CAP, not the hours away
+    enc["active"] = enc.get("active", 0) + min(time.time() - enc.get("q_started", time.time()), ACTIVE_CAP)
     enc["tries"], enc["hint_level"], enc["q_started"], enc["rule_used"] = 0, 0, time.time(), False
     enc["missed_current"] = False
     enc["free_hints"] = 1 if enc.get("mods", {}).get("first_hint_free") else 0
@@ -668,6 +682,49 @@ def rule(task_id: str, idx: int) -> dict:
         enc["rule_used"] = True
         progress.set_last(p, task_id, f"Rule for {enc['enemy']}: {text[:120]}")
     return {"rule": text, "cost": RULE_COST}
+
+
+def _steps_ok(prob: dict, final: str) -> bool:
+    if prob["type"] in LOCAL_KINDS - {"mcq"}:
+        try:
+            return keycheck.matches(prob, final)
+        except (mathcheck.NotMath, ValueError, TypeError):
+            return False
+    return bool(final.strip())
+
+
+def steps(task_id: str, idx: int) -> dict:
+    """Every rewrite with the rule used, for a problem whose worked solution the student may already see:
+    finished, or the last hint taken. The final step is checked against the key; on a mismatch it retries once."""
+    p = progress.load()
+    enc = p.get("encounters", {}).get(task_id)
+    if not enc or not 0 <= idx < len(enc["problems"]):
+        raise KeyError("No such problem.")
+    prob = enc["problems"][idx]
+    done = any(r["idx"] == idx for r in enc.get("results", []))
+    seen = enc.get("current") == idx and enc.get("hint_level", 0) >= len(prob.get("hints") or [1])
+    if not (done or seen):
+        raise ValueError("Finish the problem (or take the last hint) to see every step.")
+    if prob.get("steps"):
+        return {"steps": prob["steps"]}
+    note, rows = "", []
+    for _ in range(2):
+        r = ai.ask("claude", prompts_game.steps_for(prob, note))
+        rows = [{"math": str(s.get("math", ""))[:300], "rule": str(s.get("rule", ""))[:200]}
+                for s in (r.get("steps") or []) if isinstance(s, dict) and s.get("math")][:16]
+        final = str(r.get("final", ""))
+        if rows and _steps_ok(prob, final):
+            break
+        note = (f"A previous attempt ended at {final!r}, which does not equal the key. Re-derive carefully and "
+                f"make the last step equal the key.")
+        rows = []
+    if not rows:
+        raise ai.AIUnavailable("Couldn't build a step-by-step that matches the answer; the worked solution above still holds.")
+    with progress.transaction() as p:
+        e2 = p.get("encounters", {}).get(task_id)
+        if e2 and idx < len(e2["problems"]) and e2["problems"][idx]["prompt"] == prob["prompt"]:
+            e2["problems"][idx]["steps"] = rows
+    return {"steps": rows}
 
 
 def use_token(task_id: str, kind: str) -> dict:
@@ -742,7 +799,8 @@ def _finish(p: dict, enc: dict) -> dict:
     victory = won(enc)
     enc["state"] = "won" if victory else "escaped"
     enc["ended"] = time.time()
-    progress.record_sprint(p, max(1, round((enc["ended"] - enc["started"]) / 60)), "battle", tid)
+    secs = enc["active"] if "active" in enc else min(enc["ended"] - enc["started"], ACTIVE_CAP * len(enc["problems"]))
+    progress.record_sprint(p, max(1, round(secs / 60)), "battle", tid)
     if victory:
         stars = _stars(enc)
         if enc.get("mode") == "review" or progress.task_state(p, tid)["status"] == "review":
