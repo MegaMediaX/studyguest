@@ -313,6 +313,22 @@ def retrieve(task: str, session: str, subject: str, k: int = 4) -> list[dict]:
     return [_public(c) for c in ranked[:k] if _score(c, query, idx) > 0]
 
 
+def retrieve_exam(task: str, session: str, subject: str, date: str | None = None, k: int = 3) -> list[dict]:
+    """Past-exam pages for this task (config "exam_models": the papers of the next exam after the session's date),
+    so battles are modelled on real exams. Best keyword matches first; the papers themselves if nothing matches."""
+    course = course_for_subject(subject)
+    groups = store.load_config().get("exam_models", {}).get(course or "", [])
+    group = next((g for g in groups if (date or "") <= g["until"]), groups[-1] if groups else None)
+    if not group:
+        return []
+    idx = _index()
+    pool = [c for c in idx["chunks"] if c["course"] == course and any(_match_file(c["file"], f) for f in group["files"])]
+    query = tokens(task + " " + session)
+    ranked = sorted(pool, key=lambda c: (_score(c, query, idx), -group["files"].index(
+        next(f for f in group["files"] if _match_file(c["file"], f)))), reverse=True)
+    return [_public(c) for c in ranked[:k]]
+
+
 def _score(c: dict, query: list[str], idx: dict) -> float:
     s = 0.0
     for t in query:

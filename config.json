@@ -73,6 +73,7 @@
       "minutes": 75,
       "questions": 6,
       "sources": [
+        "25-Sum-Exam1.pdf",
         "Exam1.pdf",
         "Exam 2.pdf",
         "Final.pdf",
@@ -263,5 +264,33 @@
         }
       ]
     }
-  ]
+  ],
+  "exam_models": {
+    "MATH202": [
+      {
+        "until": "2026-10-08",
+        "files": [
+          "25-Sum-Exam1.pdf",
+          "Exam1.pdf",
+          "Solution-test1.pdf"
+        ]
+      },
+      {
+        "until": "2026-11-12",
+        "files": [
+          "Exam 2.pdf",
+          "Solution exam 2.pdf"
+        ]
+      },
+      {
+        "until": "2099-12-31",
+        "files": [
+          "Final.pdf",
+          "Solution-Final-Sp24.pdf",
+          "Exam 2.pdf",
+          "25-Sum-Exam1.pdf"
+        ]
+      }
+    ]
+  }
 }

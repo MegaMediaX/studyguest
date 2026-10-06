@@ -112,9 +112,13 @@ def generate(task: dict, session: dict, variant: str = "") -> dict:
 
 def _generate(task: dict, session: dict, variant: str) -> dict:
     chunks = corpus.retrieve(task["text"], session["session"], session["subject"], k=5)
+    exam = corpus.retrieve_exam(task["text"], session["session"], session["subject"], session.get("date"))
+    seen = {(c["file"], c["n"]) for c in chunks}
+    chunks = chunks + [c for c in exam if (c["file"], c["n"]) not in seen]
     course = course_for_subject(session["subject"])
     used = _used_setups(session) if variant else []
-    reply = ai.ask("claude", prompts_game.encounter(task, session, chunks, variant, course, used))
+    reply = ai.ask("claude", prompts_game.encounter(task, session, chunks, variant, course, used,
+                                                    exam_files=sorted({c["file"] for c in exam})))
     problems = [p for p in (_validate_problem(q) for q in reply.get("problems", [])) if p][:6]
     if course in WORK_REQUIRED_COURSES:  # written exam: at most one multiple-choice question
         mcqs = [p for p in problems if p["type"] == "mcq"]

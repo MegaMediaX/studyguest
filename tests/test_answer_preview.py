@@ -124,3 +124,19 @@ def test_review_fixes_power_preview_inverse_trig_and_point_lists():
     assert mathcheck.check("numeric", "sin^(-1)(1)", "pi/2")
     key = "(1, -2), (-1, -2)"  # a 'multi' key that lists points: any order
     assert mathcheck.check("multi", "(-1,-2), (1,-2)", key) and not mathcheck.check("multi", "(1,-2)", key)
+
+
+def test_battles_are_modelled_on_past_exams(imported, env):
+    import json as _j
+    from studyquest import corpus, encounter, importer, progress
+    doc = {"course": "MATH202", "file": "Exam1.pdf", "path": "/e.pdf", "unit": "page", "mtime": 0,
+           "pages": [{"n": 1, "src": "text", "text": "Question 2. directional derivative of f at P0 gradient unit vector"}]}
+    (env["data"] / "corpus" / "MATH202" / "Exam1.pdf.json").write_text(_j.dumps(doc))
+    corpus._INDEX.clear()
+    s, t = next(importer.all_tasks(progress.load_plan()))
+    assert [c["file"] for c in corpus.retrieve_exam(t["text"], s["session"], s["subject"], "2026-09-28")] == ["Exam1.pdf"]
+    encounter.generate(t, s)
+    prompt = next(p for prov, p in env["fake"].calls if p.startswith("You design a short learning battle"))
+    assert prompt  # recorded prefix only; check the full prompt via prompts_game directly
+    full = encounter.prompts_game.encounter(t, s, [], "", "MATH202", [], exam_files=["Exam1.pdf"])
+    assert "EXAM MODEL" in full and "Exam1.pdf" in full

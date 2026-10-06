@@ -26,7 +26,12 @@ COURSE_FORMAT = {
 
 
 def encounter(task: dict, session: dict, chunks: list[dict], variant: str = "", course: str | None = None,
-              used: list[str] | None = None) -> str:
+              used: list[str] | None = None, exam_files: list[str] | None = None) -> str:
+    exam = (f"EXAM MODEL: the sources include past exams ({', '.join(exam_files)}). Every problem must look like an "
+            "exam question on this topic: same style, wording, multi-part chaining (e.g. find ∇f, then use it), "
+            "marks-worthy difficulty and the same answer forms, but with new functions/numbers. Cite the exam "
+            "question it is modelled on. Difficulty 1 = the easiest exam sub-part, 3 = a full exam question."
+            if exam_files else "")
     avoid = ("Do NOT reuse any of these functions/setups already used for this topic:\n- " + "\n- ".join(used[:12])
              if used else "")
     if task["kind"] == "exercise":
@@ -44,6 +49,7 @@ Task: {task['text']}
 Session: {session['session']} ({session['subject']})
 {focus}
 {COURSE_FORMAT.get(course or "", "")}
+{exam}
 {variant}
 {avoid}
 Rules for every problem:
